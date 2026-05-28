@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://cjp3xrb7ouhq6"]
+
+[ext_resource type="Script" uid="uid://6vcs43xagfvd" path="res://Scripts/Player/player_controller.gd" id="1"]
+
+[sub_resource type="CapsuleShape3D" id="1"]
+height = 1.8
+
+[sub_resource type="StandardMaterial3D" id="Mat_player"]
+albedo_color = Color(0.15, 0.5, 0.75, 1)
+
+[sub_resource type="CapsuleMesh" id="2"]
+material = SubResource("Mat_player")
+height = 1.8
+
+[node name="Player" type="CharacterBody3D" unique_id=703532461]
+script = ExtResource("1")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1134771116]
+shape = SubResource("1")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=1637066983]
+mesh = SubResource("2")
