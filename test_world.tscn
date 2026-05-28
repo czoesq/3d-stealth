@@ -3,6 +3,7 @@
 [ext_resource type="PackedScene" uid="uid://cjp3xrb7ouhq6" path="res://Prefabs/Player/player.tscn" id="1"]
 [ext_resource type="Script" uid="uid://cey21v8ko8ngh" path="res://Scripts/Camera/camera_follow.gd" id="2"]
 [ext_resource type="PackedScene" uid="uid://pt47p3ad5t3n" path="res://Prefabs/Enemy/enemy.tscn" id="3"]
+[ext_resource type="Script" path="res://Scripts/Navigation/ground_nav.gd" id="4"]
 
 [sub_resource type="StandardMaterial3D" id="Mat_ground"]
 albedo_color = Color(0.25, 0.25, 0.27, 1)
@@ -58,10 +59,6 @@ albedo_color = Color(0.75, 0.45, 0.12, 1)
 material = SubResource("Mat_crate")
 
 [sub_resource type="BoxShape3D" id="BoxShape_crate"]
-
-[sub_resource type="NavigationMesh" id="NavMesh"]
-vertices = PackedVector3Array(-10, 0, -10, 10, 0, -10, -10, 0, 10, 10, 0, 10)
-polygons = Array[PackedInt32Array]([PackedInt32Array(0, 2, 3), PackedInt32Array(0, 3, 1)])
 
 [sub_resource type="PhysicsMaterial" id="PhysicsMaterial_gy3sr"]
 
@@ -147,11 +144,12 @@ mesh = SubResource("BoxMesh_crate")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Crate" unique_id=1646933784]
 shape = SubResource("BoxShape_crate")
 
-[node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
-navigation_mesh = SubResource("NavMesh")
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="." unique_id=907260319]
+script = ExtResource("4")
 
 [node name="Enemy" parent="." unique_id=1100535285 instance=ExtResource("3")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.9, 2)
+show_vision_cone = false
 
 [node name="Player" parent="." unique_id=1888511002 instance=ExtResource("1")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)

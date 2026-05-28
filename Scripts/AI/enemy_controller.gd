@@ -79,11 +79,11 @@ func _ready() -> void:
 	vision_ray = $VisionRay
 	start_position = global_position
 
+	_setup_vision_cone_debug()
 	_setup_vision_area()
 	_setup_hearing_area()
 	_collect_patrol_points()
 	_auto_generate_patrol()
-	_setup_vision_cone_debug()
 	_enter_idle()
 
 
@@ -166,6 +166,8 @@ func _setup_vision_cone_debug() -> void:
 
 
 func _update_vision_cone_mesh() -> void:
+	if not vision_cone_mesh or vision_range <= 0.0:
+		return
 	var hw := vision_range * tan(deg_to_rad(vision_angle_h * 0.5))
 	var hh := vision_range * tan(deg_to_rad(vision_angle_v * 0.5))
 	var apex := Vector3(0.0, 1.6, 0.0)
