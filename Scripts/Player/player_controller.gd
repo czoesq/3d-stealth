@@ -188,9 +188,9 @@ func on_detected() -> void:
 
 
 ## Set player visibility (e.g. when entering/exiting shadow).
-func set_visibility(is_visible: bool) -> void:
-	player_visible = is_visible
-	player_visibility_changed.emit(is_visible)
+func set_visibility(visible_state: bool) -> void:
+	player_visible = visible_state
+	player_visibility_changed.emit(visible_state)
 
 
 ## Noise value (0–100) for enemy sound detection queries.

@@ -211,7 +211,7 @@ func _on_vision_body_entered(body: Node) -> void:
 		player = body
 
 
-func _on_vision_body_exited(body: Node) -> void:
+func _on_vision_body_exited(_body: Node) -> void:
 	pass
 
 
@@ -220,7 +220,7 @@ func _on_hearing_body_entered(body: Node) -> void:
 		player = body
 
 
-func _on_hearing_body_exited(body: Node) -> void:
+func _on_hearing_body_exited(_body: Node) -> void:
 	pass
 
 
@@ -487,9 +487,6 @@ func _check_vision() -> bool:
 		player_in_sight = false
 		return false
 
-	var up_dir := dir_to_player
-	up_dir.y = 0.0
-	var vertical_dir := dir_to_player - up_dir * up_dir.length()
 	var angle_v := rad_to_deg(acos( clampf(dir_to_player.dot(Vector3.UP), -1.0, 1.0) ))
 	if angle_v > vision_angle_v * 0.5 + 90.0:
 		player_in_sight = false
