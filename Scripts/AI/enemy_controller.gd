@@ -30,12 +30,17 @@ enum State { IDLE, PATROL, SUSPICIOUS, ALERT, CHASE, KNOCKED_OUT }
 @export var angular_speed: float = 180.0
 
 @export_group("Knocked Out")
-@export var knocked_out_duration: float = 15.0
 @export var revive_time: float = 4.0
 
 @export_group("Navigation")
 @export var target_reached_distance: float = 1.0
 @export var turn_rate: float = 8.0
+
+@export_group("Patrol")
+@export var patrol_radius: float = 15.0
+
+@export_group("Debug")
+@export var show_vision_cone: bool = true
 
 var state: State = State.IDLE
 var detection_meter: float = 0.0
@@ -44,11 +49,11 @@ var player_in_sight: bool = false
 var patrol_index: int = 0
 var patrol_forward: bool = true
 var idle_timer: float = 0.0
-var knocked_out_timer: float = 0.0
 var being_revived: bool = false
 var revive_progress: float = 0.0
 var suspicious_target: Vector3
 var alertness_cooldown: float = 0.0
+var start_position: Vector3
 
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 var player: CharacterBody3D
@@ -57,6 +62,7 @@ var vision_area: Area3D
 var hearing_area: Area3D
 var vision_ray: RayCast3D
 var patrol_points: Array[Node3D] = []
+var vision_cone_mesh: MeshInstance3D
 
 @onready var collision_shape: CollisionShape3D = $CollisionShape3D
 
@@ -71,10 +77,13 @@ func _ready() -> void:
 	vision_area = $VisionArea
 	hearing_area = $HearingArea
 	vision_ray = $VisionRay
+	start_position = global_position
 
 	_setup_vision_area()
 	_setup_hearing_area()
 	_collect_patrol_points()
+	_auto_generate_patrol()
+	_setup_vision_cone_debug()
 	_enter_idle()
 
 
@@ -91,6 +100,7 @@ func _setup_vision_area() -> void:
 			vision_area.remove_child(c)
 			c.queue_free()
 	vision_area.add_child(col)
+	_update_vision_cone_mesh()
 
 
 func _setup_hearing_area() -> void:
@@ -116,6 +126,76 @@ func _collect_patrol_points() -> void:
 	for child in container.get_children():
 		if child is Node3D:
 			patrol_points.append(child)
+
+
+func _auto_generate_patrol() -> void:
+	if patrol_points.size() > 0:
+		return
+	var container := $PatrolPoints
+	if not container:
+		container = Node3D.new()
+		container.name = "PatrolPoints"
+		add_child(container)
+		container.owner = get_tree().edited_scene_root if Engine.is_editor_hint() else self
+	var n := randi_range(4, 6)
+	var circular := randi() % 2 == 0
+	var angle_offset := randf_range(0.0, TAU)
+	var radius := randf_range(patrol_radius * 0.4, patrol_radius * 0.8)
+	for i in n:
+		var pt := Marker3D.new()
+		pt.name = "PatrolPoint_%d" % i
+		var pos: Vector3
+		if circular:
+			var a := angle_offset + float(i) / float(n) * TAU
+			pos = start_position + Vector3(cos(a) * radius, 0.0, sin(a) * radius)
+		else:
+			var t := float(i) / float(n - 1) * 2.0 - 1.0
+			var dir := Vector3(cos(angle_offset), 0.0, sin(angle_offset))
+			pos = start_position + dir * t * radius
+		pt.position = pos - global_position
+		container.add_child(pt)
+		patrol_points.append(pt)
+
+
+func _setup_vision_cone_debug() -> void:
+	vision_cone_mesh = MeshInstance3D.new()
+	vision_cone_mesh.name = "VisionConeDebug"
+	add_child(vision_cone_mesh)
+	_update_vision_cone_mesh()
+	vision_cone_mesh.visible = show_vision_cone
+
+
+func _update_vision_cone_mesh() -> void:
+	var hw := vision_range * tan(deg_to_rad(vision_angle_h * 0.5))
+	var hh := vision_range * tan(deg_to_rad(vision_angle_v * 0.5))
+	var apex := Vector3(0.0, 1.6, 0.0)
+	var dist := -vision_range
+	var b1 := Vector3(-hw, -hh, dist)
+	var b2 := Vector3(hw, -hh, dist)
+	var b3 := Vector3(hw, hh, dist)
+	var b4 := Vector3(-hw, hh, dist)
+
+	var verts := PackedVector3Array([
+		apex, b1, b2,
+		apex, b2, b3,
+		apex, b3, b4,
+		apex, b4, b1,
+		b1, b3, b2,
+		b1, b4, b3,
+	])
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.85, 0.0, 0.12)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.no_depth_test = true
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	var array := []
+	array.resize(Mesh.ARRAY_MAX)
+	array[Mesh.ARRAY_VERTEX] = verts
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, array)
+	mesh.surface_set_material(0, mat)
+	vision_cone_mesh.mesh = mesh
 
 
 func _enter_idle() -> void:
@@ -290,18 +370,14 @@ func _process_chase(delta: float) -> void:
 
 
 func _process_knocked_out(delta: float) -> void:
-	knocked_out_timer -= delta
 	if being_revived:
 		revive_progress += delta / revive_time
 		if revive_progress >= 1.0:
 			_revive()
-	elif knocked_out_timer <= 0.0:
-		_revive()
 
 
 func knock_out() -> void:
 	state = State.KNOCKED_OUT
-	knocked_out_timer = knocked_out_duration
 	being_revived = false
 	revive_progress = 0.0
 	detection_meter = 0.0
