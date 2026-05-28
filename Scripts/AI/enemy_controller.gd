@@ -41,6 +41,7 @@ enum State { IDLE, PATROL, SUSPICIOUS, ALERT, CHASE, KNOCKED_OUT }
 
 @export_group("Debug")
 @export var show_vision_cone: bool = true
+@export var debug: bool = false
 
 var state: State = State.IDLE
 var detection_meter: float = 0.0
@@ -84,6 +85,12 @@ func _ready() -> void:
 	_setup_hearing_area()
 	_collect_patrol_points()
 	_auto_generate_patrol()
+
+	if debug:
+		print("enemy _ready: pos=", global_position, " patrol_points=", patrol_points.size())
+		for p in patrol_points:
+			print("  patrol: ", p.name, " global=", p.global_position)
+
 	_enter_idle()
 
 
@@ -249,22 +256,32 @@ func _process_idle(delta: float) -> void:
 	idle_timer -= delta
 	if idle_timer <= 0.0:
 		if patrol_points.size() > 0:
+			if debug:
+				print("enemy: idle->patrol")
 			_enter_patrol()
 		else:
+			if debug:
+				print("enemy: idle timeout, no patrol points, re-idle")
 			idle_timer = randf_range(2.0, 5.0)
 
 
 func _enter_patrol() -> void:
 	state = State.PATROL
+	if debug:
+		print("enemy: enter patrol")
 	_pick_next_patrol_point()
 
 
 func _pick_next_patrol_point() -> void:
 	if patrol_points.size() == 0:
+		if debug:
+			print("enemy: pick patrol - empty")
 		_enter_idle()
 		return
 	if patrol_points.size() == 1:
 		nav_agent.target_position = patrol_points[0].global_position
+		if debug:
+			print("enemy: patrol target (single) -> ", nav_agent.target_position)
 		return
 	if patrol_forward:
 		patrol_index += 1
@@ -277,10 +294,14 @@ func _pick_next_patrol_point() -> void:
 			patrol_forward = true
 			patrol_index = mini(1, patrol_points.size() - 1)
 	nav_agent.target_position = patrol_points[patrol_index].global_position
+	if debug:
+		print("enemy: patrol target idx=", patrol_index, " -> ", nav_agent.target_position)
 
 
 func _process_patrol(delta: float) -> void:
 	if nav_agent.is_navigation_finished():
+		if debug:
+			print("enemy: patrol nav finished, picking next")
 		_pick_next_patrol_point()
 	_move_toward_target(patrol_speed, delta)
 
@@ -539,6 +560,8 @@ func _update_last_known_pos() -> void:
 
 func _move_toward_target(speed: float, delta: float) -> void:
 	if nav_agent.is_navigation_finished():
+		if debug:
+			print("enemy: move nav_finished=true, staying put")
 		velocity = Vector3.ZERO
 		return
 
@@ -550,7 +573,11 @@ func _move_toward_target(speed: float, delta: float) -> void:
 		velocity = dir * speed
 		var target_basis := Basis.looking_at(-dir, Vector3.UP)
 		transform.basis = transform.basis.slerp(target_basis, turn_rate * delta)
+		if debug:
+			print("enemy: moving vel=", velocity, " dir=", dir, " next_pos=", next_pos)
 	else:
+		if debug:
+			print("enemy: zero dir, vel=0")
 		velocity = Vector3.ZERO
 
 	move_and_slide()

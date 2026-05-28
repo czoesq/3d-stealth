@@ -20,5 +20,7 @@ func _ready() -> void:
 	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source_geo)
 	navigation_mesh = nav_mesh
 
+	print("ground_nav: polygons=%d vertices=%d" % [nav_mesh.get_polygon_count(), nav_mesh.vertices.size()])
+
 	remove_child(src)
 	src.queue_free()
