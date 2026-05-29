@@ -31,9 +31,9 @@ shape = SubResource("2")
 mesh = SubResource("3")
 
 [node name="NavigationAgent3D" type="NavigationAgent3D" parent="."]
-path_desired_distance = 0.5
-target_desired_distance = 0.5
-path_height_offset = 0.9
+path_desired_distance = 2.0
+target_desired_distance = 1.0
+path_height_offset = 0.0
 pathfinding_algorithm = 0
 
 [node name="VisionArea" type="Area3D" parent="."]
