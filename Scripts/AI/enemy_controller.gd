@@ -205,9 +205,9 @@ func _setup_debug_waypoints() -> void:
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		mesh.material = mat
 		sphere.mesh = mesh
-		sphere.global_position = pt.global_position
-		sphere.set_as_top_level(true)
 		add_child(sphere)
+		sphere.set_as_top_level(true)
+		sphere.global_position = pt.global_position
 		_debug_patrol_markers.append(sphere)
 
 	var target_sphere := MeshInstance3D.new()
@@ -220,17 +220,14 @@ func _setup_debug_waypoints() -> void:
 	tmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	tmesh.material = tmat
 	target_sphere.mesh = tmesh
-	target_sphere.set_as_top_level(true)
 	add_child(target_sphere)
+	target_sphere.set_as_top_level(true)
 	_debug_target_marker = target_sphere
 
 
 func _update_debug_waypoints() -> void:
 	if not show_waypoints:
 		return
-	for i in _debug_patrol_markers.size():
-		if i < patrol_points.size():
-			_debug_patrol_markers[i].global_position = patrol_points[i].global_position
 	if _debug_target_marker:
 		_debug_target_marker.global_position = nav_agent.target_position
 
