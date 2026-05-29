@@ -293,9 +293,14 @@ func _pick_next_patrol_point() -> void:
 		if patrol_index < 0:
 			patrol_forward = true
 			patrol_index = mini(1, patrol_points.size() - 1)
-	nav_agent.target_position = patrol_points[patrol_index].global_position
+	var target := patrol_points[patrol_index].global_position
+	nav_agent.target_position = target
 	if debug:
-		print("enemy: patrol target idx=", patrol_index, " -> ", nav_agent.target_position)
+		var map := nav_agent.get_navigation_map()
+		var path := NavigationServer3D.map_get_path(map, global_position, target, true)
+		print("enemy: patrol target idx=", patrol_index, " -> ", target, " path_nodes=", path.size())
+		for i in path.size():
+			print("  node[", i, "] = ", path[i])
 
 
 func _process_patrol(delta: float) -> void:
@@ -577,7 +582,7 @@ func _move_toward_target(speed: float, delta: float) -> void:
 			print("enemy: moving vel=", velocity, " dir=", dir, " next_pos=", next_pos)
 	else:
 		if debug:
-			print("enemy: zero dir, vel=0")
+			print("enemy: zero dir, my_pos=", global_position, " next_pos=", next_pos, " nav_finished=", nav_agent.is_navigation_finished())
 		velocity = Vector3.ZERO
 
 	move_and_slide()
