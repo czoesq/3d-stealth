@@ -91,6 +91,7 @@ mesh = SubResource("BoxMesh_ground")
 shape = SubResource("BoxShape_ground")
 
 [node name="WallL" type="StaticBody3D" parent="." unique_id=1705404161]
+groups = ["nav_obstacle"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 1, 0)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="WallL" unique_id=546430918]
@@ -100,6 +101,7 @@ mesh = SubResource("BoxMesh_wall_side")
 shape = SubResource("BoxShape_wall_side")
 
 [node name="WallR" type="StaticBody3D" parent="." unique_id=572183102]
+groups = ["nav_obstacle"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 1, 0)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="WallR" unique_id=676021321]
@@ -109,6 +111,7 @@ mesh = SubResource("BoxMesh_wall_side")
 shape = SubResource("BoxShape_wall_side")
 
 [node name="WallTop" type="StaticBody3D" parent="." unique_id=216773359]
+groups = ["nav_obstacle"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -8)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="WallTop" unique_id=1496330901]
@@ -118,6 +121,7 @@ mesh = SubResource("BoxMesh_wall_top")
 shape = SubResource("BoxShape_wall_top")
 
 [node name="Platform" type="StaticBody3D" parent="." unique_id=525806817]
+groups = ["nav_obstacle"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 1.5, 4)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Platform" unique_id=1383877032]
@@ -136,6 +140,7 @@ mesh = SubResource("BoxMesh_ramp")
 shape = SubResource("BoxShape_ramp")
 
 [node name="Crate" type="StaticBody3D" parent="." unique_id=764656682]
+groups = ["nav_obstacle"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.5, -3)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Crate" unique_id=1596661328]

@@ -1,5 +1,8 @@
 extends NavigationRegion3D
 
+@export var obstacle_group: String = "nav_obstacle"
+
+
 func _ready() -> void:
 	var src := StaticBody3D.new()
 	var col := CollisionShape3D.new()
@@ -17,6 +20,11 @@ func _ready() -> void:
 
 	var source_geo := NavigationMeshSourceGeometryData3D.new()
 	NavigationServer3D.parse_source_geometry_data(nav_mesh, source_geo, self)
+
+	for obs in get_tree().get_nodes_in_group(obstacle_group):
+		if obs is StaticBody3D or obs is MeshInstance3D:
+			NavigationServer3D.parse_source_geometry_data(nav_mesh, source_geo, obs)
+
 	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source_geo)
 	navigation_mesh = nav_mesh
 

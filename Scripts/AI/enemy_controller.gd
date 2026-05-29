@@ -24,7 +24,10 @@ enum State { IDLE, PATROL, SUSPICIOUS, ALERT, CHASE, KNOCKED_OUT }
 @export var alert_threshold: float = 50.0
 
 @export_group("Movement")
-@export var patrol_speed: float = 2.5
+@export var patrol_speed: float = 1.25
+@export var patrol_pause_chance: float = 0.3
+@export var patrol_pause_min: float = 2.0
+@export var patrol_pause_max: float = 5.0
 @export var chase_speed: float = 5.0
 @export var suspicious_speed: float = 3.5
 @export var angular_speed: float = 180.0
@@ -55,6 +58,8 @@ var revive_progress: float = 0.0
 var suspicious_target: Vector3
 var alertness_cooldown: float = 0.0
 var start_position: Vector3
+var patrol_paused: bool = false
+var patrol_pause_timer: float = 0.0
 
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 var player: CharacterBody3D
@@ -311,9 +316,27 @@ func _pick_next_patrol_point() -> void:
 
 
 func _process_patrol(delta: float) -> void:
+	if patrol_paused:
+		patrol_pause_timer -= delta
+		velocity = Vector3.ZERO
+		move_and_slide()
+		if patrol_pause_timer <= 0.0:
+			patrol_paused = false
+			if debug:
+				print("enemy: patrol pause ended")
+			_pick_next_patrol_point()
+		return
 	if nav_agent.is_navigation_finished():
 		if debug:
-			print("enemy: patrol nav finished, picking next")
+			print("enemy: patrol nav finished")
+		if randf() < patrol_pause_chance:
+			patrol_paused = true
+			patrol_pause_timer = randf_range(patrol_pause_min, patrol_pause_max)
+			if debug:
+				print("enemy: patrol pausing for %.1fs" % patrol_pause_timer)
+			velocity = Vector3.ZERO
+			move_and_slide()
+			return
 		_pick_next_patrol_point()
 	_move_toward_target(patrol_speed, delta)
 
