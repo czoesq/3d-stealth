@@ -148,17 +148,24 @@ func _auto_generate_patrol() -> void:
 	var circular := randi() % 2 == 0
 	var angle_offset := randf_range(0.0, TAU)
 	var radius := randf_range(patrol_radius * 0.4, patrol_radius * 0.8)
+	var nav_half := 6.0
 	for i in n:
 		var pt := Marker3D.new()
 		pt.name = "PatrolPoint_%d" % i
 		var pos: Vector3
-		if circular:
-			var a := angle_offset + float(i) / float(n) * TAU
-			pos = start_position + Vector3(cos(a) * radius, 0.0, sin(a) * radius)
-		else:
-			var t := float(i) / float(n - 1) * 2.0 - 1.0
-			var dir := Vector3(cos(angle_offset), 0.0, sin(angle_offset))
-			pos = start_position + dir * t * radius
+		for attempt in 10:
+			if circular:
+				var a := angle_offset + float(i) / float(n) * TAU
+				pos = start_position + Vector3(cos(a) * radius, 0.0, sin(a) * radius)
+			else:
+				var t := float(i) / float(n - 1) * 2.0 - 1.0
+				var dir := Vector3(cos(angle_offset), 0.0, sin(angle_offset))
+				pos = start_position + dir * t * radius
+			if abs(pos.x) <= nav_half and abs(pos.z) <= nav_half:
+				break
+			angle_offset += deg_to_rad(30.0)
+		pos.x = clampf(pos.x, -nav_half, nav_half)
+		pos.z = clampf(pos.z, -nav_half, nav_half)
 		pt.position = pos - global_position
 		container.add_child(pt)
 		patrol_points.append(pt)

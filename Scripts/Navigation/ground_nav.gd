@@ -4,7 +4,7 @@ func _ready() -> void:
 	var src := StaticBody3D.new()
 	var col := CollisionShape3D.new()
 	var box := BoxShape3D.new()
-	box.size = Vector3(20, 0.1, 20)
+	box.size = Vector3(14, 0.1, 14)
 	col.shape = box
 	src.add_child(col)
 	add_child(src)
@@ -20,7 +20,7 @@ func _ready() -> void:
 	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source_geo)
 	navigation_mesh = nav_mesh
 
-	print("ground_nav: polygons=%d vertices=%d" % [nav_mesh.get_polygon_count(), nav_mesh.vertices.size()])
-
 	remove_child(src)
 	src.queue_free()
+
+	print("ground_nav: polygons=%d vertices=%d" % [nav_mesh.get_polygon_count(), nav_mesh.vertices.size()])
