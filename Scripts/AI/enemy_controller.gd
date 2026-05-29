@@ -44,6 +44,7 @@ enum State { IDLE, PATROL, SUSPICIOUS, ALERT, CHASE, KNOCKED_OUT }
 
 @export_group("Debug")
 @export var show_vision_cone: bool = true
+@export var show_waypoints: bool = true
 @export var debug: bool = false
 
 var state: State = State.IDLE
@@ -71,6 +72,8 @@ var hearing_area: Area3D
 var vision_ray: RayCast3D
 var patrol_points: Array[Node3D] = []
 var vision_cone_mesh: MeshInstance3D
+var _debug_patrol_markers: Array[MeshInstance3D] = []
+var _debug_target_marker: MeshInstance3D
 
 @onready var collision_shape: CollisionShape3D = $CollisionShape3D
 
@@ -93,6 +96,7 @@ func _ready() -> void:
 	_setup_hearing_area()
 	_collect_patrol_points()
 	_auto_generate_patrol()
+	_setup_debug_waypoints()
 
 	if debug:
 		print("enemy _ready: pos=", global_position, " patrol_points=", patrol_points.size())
@@ -187,6 +191,50 @@ func _setup_vision_cone_debug() -> void:
 	vision_cone_mesh.visible = show_vision_cone
 
 
+func _setup_debug_waypoints() -> void:
+	if not show_waypoints:
+		return
+	for pt in patrol_points:
+		var sphere := MeshInstance3D.new()
+		sphere.name = "DebugPatrolPoint_" + pt.name
+		var mesh := SphereMesh.new()
+		mesh.radius = 0.15
+		mesh.height = 0.3
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.2, 0.5, 1.0, 0.6)
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mesh.material = mat
+		sphere.mesh = mesh
+		sphere.global_position = pt.global_position
+		sphere.set_as_top_level(true)
+		add_child(sphere)
+		_debug_patrol_markers.append(sphere)
+
+	var target_sphere := MeshInstance3D.new()
+	target_sphere.name = "DebugCurrentTarget"
+	var tmesh := SphereMesh.new()
+	tmesh.radius = 0.25
+	tmesh.height = 0.5
+	var tmat := StandardMaterial3D.new()
+	tmat.albedo_color = Color(0.2, 1.0, 0.2, 0.8)
+	tmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	tmesh.material = tmat
+	target_sphere.mesh = tmesh
+	target_sphere.set_as_top_level(true)
+	add_child(target_sphere)
+	_debug_target_marker = target_sphere
+
+
+func _update_debug_waypoints() -> void:
+	if not show_waypoints:
+		return
+	for i in _debug_patrol_markers.size():
+		if i < patrol_points.size():
+			_debug_patrol_markers[i].global_position = patrol_points[i].global_position
+	if _debug_target_marker:
+		_debug_target_marker.global_position = nav_agent.target_position
+
+
 func _update_vision_cone_mesh() -> void:
 	if not vision_cone_mesh or vision_range <= 0.0:
 		return
@@ -265,6 +313,7 @@ func _physics_process(delta: float) -> void:
 			_process_knocked_out(delta)
 
 	_update_detection(delta)
+	_update_debug_waypoints()
 
 
 func _process_idle(delta: float) -> void:
@@ -621,17 +670,27 @@ func _move_toward_target(speed: float, delta: float) -> void:
 	else:
 		_stuck_frames = 0
 
-	velocity = dir * speed
+	var desired_dir := dir
+	var space_state := get_world_3d().direct_space_state
+	var ray_hit := space_state.intersect_ray(PhysicsRayQueryParameters3D.create(global_position, next_pos, 1, [self]))
+	if ray_hit and ray_hit.collider != player:
+		if debug:
+			print("enemy: obstacle ", ray_hit.collider.name, " in path, normal=", ray_hit.normal)
+		var slide_dir := dir.slide(ray_hit.normal).normalized()
+		if slide_dir.length_squared() > 0.0:
+			desired_dir = slide_dir
+
+	velocity = desired_dir * speed
 
 	if _stuck_frames > 4:
 		if debug:
 			print("enemy: stuck for ", _stuck_frames, " frames, sidestepping")
-		var perp := Vector3(-dir.z, 0.0, dir.x)
-		velocity = (dir + perp * 0.6).normalized() * speed
+		var perp := Vector3(-desired_dir.z, 0.0, desired_dir.x)
+		velocity = (desired_dir + perp * 0.6).normalized() * speed
 
 	move_and_slide()
 
-	var target_basis := Basis.looking_at(-dir, Vector3.UP)
+	var target_basis := Basis.looking_at(-desired_dir, Vector3.UP)
 	transform.basis = transform.basis.slerp(target_basis, turn_rate * delta)
 
 
