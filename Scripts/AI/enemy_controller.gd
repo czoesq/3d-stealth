@@ -71,6 +71,7 @@ var vision_area: Area3D
 var hearing_area: Area3D
 var vision_ray: RayCast3D
 var patrol_points: Array[Node3D] = []
+var patrol_world_positions: Array[Vector3] = []
 var vision_cone_mesh: MeshInstance3D
 var _debug_patrol_markers: Array[MeshInstance3D] = []
 var _debug_target_marker: MeshInstance3D
@@ -142,9 +143,11 @@ func _collect_patrol_points() -> void:
 	if not container:
 		return
 	patrol_points.clear()
+	patrol_world_positions.clear()
 	for child in container.get_children():
 		if child is Node3D:
 			patrol_points.append(child)
+			patrol_world_positions.append(child.global_position)
 
 
 func _auto_generate_patrol() -> void:
@@ -181,6 +184,7 @@ func _auto_generate_patrol() -> void:
 		pt.position = pos - global_position
 		container.add_child(pt)
 		patrol_points.append(pt)
+		patrol_world_positions.append(pos)
 
 
 func _setup_vision_cone_debug() -> void:
@@ -194,9 +198,11 @@ func _setup_vision_cone_debug() -> void:
 func _setup_debug_waypoints() -> void:
 	if not show_waypoints:
 		return
-	for pt in patrol_points:
+	for i in patrol_points.size():
+		if i >= patrol_world_positions.size():
+			break
 		var sphere := MeshInstance3D.new()
-		sphere.name = "DebugPatrolPoint_" + pt.name
+		sphere.name = "DebugPatrolPoint_" + patrol_points[i].name
 		var mesh := SphereMesh.new()
 		mesh.radius = 0.15
 		mesh.height = 0.3
@@ -207,7 +213,7 @@ func _setup_debug_waypoints() -> void:
 		sphere.mesh = mesh
 		add_child(sphere)
 		sphere.set_as_top_level(true)
-		sphere.global_position = pt.global_position
+		sphere.global_position = patrol_world_positions[i]
 		_debug_patrol_markers.append(sphere)
 
 	var target_sphere := MeshInstance3D.new()
@@ -334,27 +340,27 @@ func _enter_patrol() -> void:
 
 
 func _pick_next_patrol_point() -> void:
-	if patrol_points.size() == 0:
+	if patrol_world_positions.size() == 0:
 		if debug:
 			print("enemy: pick patrol - empty")
 		_enter_idle()
 		return
-	if patrol_points.size() == 1:
-		nav_agent.target_position = patrol_points[0].global_position
+	if patrol_world_positions.size() == 1:
+		nav_agent.target_position = patrol_world_positions[0]
 		if debug:
 			print("enemy: patrol target (single) -> ", nav_agent.target_position)
 		return
 	if patrol_forward:
 		patrol_index += 1
-		if patrol_index >= patrol_points.size():
+		if patrol_index >= patrol_world_positions.size():
 			patrol_forward = false
-			patrol_index = maxi(patrol_points.size() - 2, 0)
+			patrol_index = maxi(patrol_world_positions.size() - 2, 0)
 	else:
 		patrol_index -= 1
 		if patrol_index < 0:
 			patrol_forward = true
-			patrol_index = mini(1, patrol_points.size() - 1)
-	var target := patrol_points[patrol_index].global_position
+			patrol_index = mini(1, patrol_world_positions.size() - 1)
+	var target := patrol_world_positions[patrol_index]
 	nav_agent.target_position = target
 	if debug:
 		var map := nav_agent.get_navigation_map()
