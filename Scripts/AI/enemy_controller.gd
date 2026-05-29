@@ -25,7 +25,7 @@ enum State { IDLE, PATROL, SUSPICIOUS, ALERT, CHASE, KNOCKED_OUT }
 
 @export_group("Movement")
 @export var patrol_speed: float = 1.25
-@export var patrol_pause_chance: float = 0.3
+@export var patrol_pause_chance: float = 0.0
 @export var patrol_pause_min: float = 2.0
 @export var patrol_pause_max: float = 5.0
 @export var chase_speed: float = 5.0
@@ -60,6 +60,8 @@ var alertness_cooldown: float = 0.0
 var start_position: Vector3
 var patrol_paused: bool = false
 var patrol_pause_timer: float = 0.0
+var _stuck_frames: int = 0
+var _last_position: Vector3
 
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 var player: CharacterBody3D
@@ -84,6 +86,7 @@ func _ready() -> void:
 	hearing_area = $HearingArea
 	vision_ray = $VisionRay
 	start_position = global_position
+	_last_position = global_position
 
 	_setup_vision_cone_debug()
 	_setup_vision_area()
@@ -595,27 +598,41 @@ func _update_last_known_pos() -> void:
 
 func _move_toward_target(speed: float, delta: float) -> void:
 	if nav_agent.is_navigation_finished():
-		if debug:
-			print("enemy: move nav_finished=true, staying put")
+		if debug and velocity.length_squared() > 0.0:
+			print("enemy: move nav_finished=true, was moving, stopping")
 		velocity = Vector3.ZERO
+		move_and_slide()
 		return
 
 	var next_pos := nav_agent.get_next_path_position()
 	var dir := (next_pos - global_position).normalized()
 	dir.y = 0.0
 
-	if dir.length_squared() > 0.0:
-		velocity = dir * speed
-		var target_basis := Basis.looking_at(-dir, Vector3.UP)
-		transform.basis = transform.basis.slerp(target_basis, turn_rate * delta)
-		if debug:
-			print("enemy: moving vel=", velocity, " dir=", dir, " next_pos=", next_pos)
-	else:
-		if debug:
-			print("enemy: zero dir, my_pos=", global_position, " next_pos=", next_pos, " nav_finished=", nav_agent.is_navigation_finished())
+	if dir.length_squared() <= 0.0:
 		velocity = Vector3.ZERO
+		move_and_slide()
+		return
+
+	var dist_moved := global_position.distance_to(_last_position)
+	_last_position = global_position
+
+	if dist_moved < 0.005:
+		_stuck_frames += 1
+	else:
+		_stuck_frames = 0
+
+	velocity = dir * speed
+
+	if _stuck_frames > 4:
+		if debug:
+			print("enemy: stuck for ", _stuck_frames, " frames, sidestepping")
+		var perp := Vector3(-dir.z, 0.0, dir.x)
+		velocity = (dir + perp * 0.6).normalized() * speed
 
 	move_and_slide()
+
+	var target_basis := Basis.looking_at(-dir, Vector3.UP)
+	transform.basis = transform.basis.slerp(target_basis, turn_rate * delta)
 
 
 func _rotate_look(target: Vector3, delta: float) -> void:
