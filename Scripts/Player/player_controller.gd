@@ -44,6 +44,7 @@ var crouching: bool = false
 var sprinting: bool = false
 var was_on_floor: bool = true
 var player_visible: bool = true
+var invisible_to_ai: bool = false
 
 var collision_shape: CollisionShape3D
 @onready var camera: Camera3D = get_viewport().get_camera_3d()
@@ -57,6 +58,7 @@ signal player_visibility_changed(visible: bool)
 
 
 func _ready() -> void:
+	add_to_group("player")
 	collision_shape = $CollisionShape3D
 	if collision_shape and collision_shape.shape is CapsuleShape3D:
 		normal_collision_height = collision_shape.shape.height
@@ -97,6 +99,12 @@ func _handle_state_toggles() -> void:
 	if Input.is_action_just_pressed("crouch_toggle"):
 		crouching = not crouching
 		movement_state_changed.emit("crouch" if crouching else "walk")
+
+	if Input.is_action_just_pressed("toggle_invisibility"):
+		invisible_to_ai = not invisible_to_ai
+
+	if Input.is_action_just_pressed("skill_debug_toggle"):
+		_toggle_skill_debug()
 
 	var moving := _get_input_direction().length_squared() > 0.01
 	sprinting = Input.is_action_pressed("sprint") and not crouching and moving
@@ -209,3 +217,20 @@ func emit_noise(amount: float) -> void:
 ## Hook: Replace with actual light/shadow and line-of-sight calculation.
 func get_visibility_factor() -> float:
 	return 0.0 if not player_visible else 1.0
+
+func _toggle_skill_debug() -> void:
+	var existing := get_tree().current_scene.find_child("SkillDebugUI", false, false)
+	if existing:
+		existing.queue_free()
+		return
+	var SkillDebugUI := preload("res://Scripts/UI/SkillDebugUI.gd")
+	var ui := SkillDebugUI.new()
+	ui.name = "SkillDebugUI"
+	get_tree().current_scene.add_child(ui)
+
+
+func is_invisible_to_ai() -> bool:
+	return invisible_to_ai
+
+func is_crouching() -> bool:
+	return crouching
