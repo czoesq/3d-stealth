@@ -46,6 +46,7 @@ var was_on_floor: bool = true
 var player_visible: bool = true
 var invisible_to_ai: bool = false
 
+var takedown_active: bool = false
 var collision_shape: CollisionShape3D
 @onready var camera: Camera3D = get_viewport().get_camera_3d()
 
@@ -66,8 +67,22 @@ func _ready() -> void:
 	current_stealth = max_stealth
 	stealth_changed.emit(current_stealth)
 
+	_setup_takedown_controller()
+
+
+func _setup_takedown_controller() -> void:
+	var TakedownCtrl := preload("res://Scripts/Player/PlayerTakedownController.gd")
+	var ctrl := TakedownCtrl.new()
+	ctrl.name = "PlayerTakedownController"
+	add_child(ctrl)
+
 
 func _physics_process(delta: float) -> void:
+	if takedown_active:
+		velocity = Vector3.ZERO
+		move_and_slide()
+		return
+
 	_handle_state_toggles()
 	_handle_gravity(delta)
 	_handle_jump()
@@ -234,3 +249,6 @@ func is_invisible_to_ai() -> bool:
 
 func is_crouching() -> bool:
 	return crouching
+
+func set_takedown_active(active: bool) -> void:
+	takedown_active = active

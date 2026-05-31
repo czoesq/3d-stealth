@@ -4,7 +4,7 @@ signal xp_changed(new_total: int)
 signal skill_upgraded(skill_name: String, new_level: int)
 signal neural_stimulators_changed(new_count: int)
 
-const SAVE_PATH: String = "user://SkillSaveData.tres"
+const SAVE_PATH: String = "user://SaveDataClass.tres"
 
 const SKILL_NAMES: Array[String] = ["stealth", "hacking", "subdue", "awareness", "gadgets"]
 
@@ -26,7 +26,7 @@ const REQUIRES_STIMULATOR: Dictionary = {
 	"gadgets": true,
 }
 
-const SkillSaveData = preload("res://Scripts/Skills/SkillSaveData.gd")
+const SaveDataClass = preload("res://Scripts/Skills/SkillSaveData.gd")
 
 var save_data: Resource
 
@@ -39,7 +39,7 @@ func _load_save() -> void:
 	if ResourceLoader.exists(SAVE_PATH):
 		save_data = load(SAVE_PATH)
 	else:
-		save_data = SkillSaveData.new()
+		save_data = SaveDataClass.new()
 		_save()
 
 
@@ -130,12 +130,12 @@ func add_neural_stimulators(amount: int) -> void:
 
 
 func reset_to_defaults() -> void:
-	save_data = SkillSaveData.new()
+	save_data = SaveDataClass.new()
 	_save()
 	xp_changed.emit(save_data.total_xp)
 	neural_stimulators_changed.emit(save_data.neural_stimulators)
-	for name in SKILL_NAMES:
-		skill_upgraded.emit(name, save_data.skill_levels.get(name, 0))
+	for skill_name in SKILL_NAMES:
+		skill_upgraded.emit(skill_name, save_data.skill_levels.get(skill_name, 0))
 
 
 func _get_upgrade_cost(skill_name: String, current_level: int) -> int:

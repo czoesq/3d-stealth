@@ -99,10 +99,10 @@ func _skill_section(parent: Container) -> void:
 	header.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0))
 	parent.add_child(header)
 
-	for name in SKILL_NAMES:
-		var row := _make_skill_row(name)
+	for skill_name in SKILL_NAMES:
+		var row := _make_skill_row(skill_name)
 		parent.add_child(row)
-		_skill_rows[name] = row
+		_skill_rows[skill_name] = row
 
 
 func _make_skill_row(skill_name: String) -> HBoxContainer:
@@ -138,10 +138,10 @@ func _make_skill_row(skill_name: String) -> HBoxContainer:
 	return hb
 
 
-func _refresh_skill_row(name: String, level_label: Label, action_btn: Button, status_label: Label) -> void:
-	var level := SkillManager.get_skill_level(name)
-	var unlocked := SkillManager.is_skill_unlocked(name)
-	var cost := SkillManager.get_next_level_xp_cost(name)
+func _refresh_skill_row(skill_name: String, level_label: Label, action_btn: Button, status_label: Label) -> void:
+	var level := SkillManager.get_skill_level(skill_name)
+	var unlocked := SkillManager.is_skill_unlocked(skill_name)
+	var cost := SkillManager.get_next_level_xp_cost(skill_name)
 	var xp := SkillManager.get_total_xp()
 
 	level_label.text = "Lv %d" % level
@@ -172,15 +172,15 @@ func _refresh_skill_row(name: String, level_label: Label, action_btn: Button, st
 		status_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 		return
 
-	action_btn.pressed.connect(_on_skill_action.bind(name, level_label, action_btn, status_label))
+	action_btn.pressed.connect(_on_skill_action.bind(skill_name, level_label, action_btn, status_label))
 
 
-func _on_skill_action(name: String, level_label: Label, action_btn: Button, status_label: Label) -> void:
-	if not SkillManager.is_skill_unlocked(name):
-		SkillManager.unlock_skill_tree(name)
+func _on_skill_action(skill_name: String, level_label: Label, action_btn: Button, status_label: Label) -> void:
+	if not SkillManager.is_skill_unlocked(skill_name):
+		SkillManager.unlock_skill_tree(skill_name)
 	else:
-		SkillManager.upgrade_skill(name)
-	_refresh_skill_row(name, level_label, action_btn, status_label)
+		SkillManager.upgrade_skill(skill_name)
+	_refresh_skill_row(skill_name, level_label, action_btn, status_label)
 	_refresh_global_stats()
 
 
@@ -235,25 +235,25 @@ func _xp_row(parent: Container) -> void:
 func _on_add_stimulator() -> void:
 	SkillManager.add_neural_stimulators(1)
 	_refresh_global_stats()
-	for name in SKILL_NAMES:
-		var row := _skill_rows.get(name) as HBoxContainer
+	for skill_name in SKILL_NAMES:
+		var row := _skill_rows.get(skill_name) as HBoxContainer
 		if row:
 			var lv := row.get_node("Level") as Label
 			var act := row.get_node("Action") as Button
 			var st := row.get_node("Status") as Label
-			_refresh_skill_row(name, lv, act, st)
+			_refresh_skill_row(skill_name, lv, act, st)
 
 
 func _on_add_xp() -> void:
 	SkillManager.add_xp(100)
 	_refresh_global_stats()
-	for name in SKILL_NAMES:
-		var row := _skill_rows.get(name) as HBoxContainer
+	for skill_name in SKILL_NAMES:
+		var row := _skill_rows.get(skill_name) as HBoxContainer
 		if row:
 			var lv := row.get_node("Level") as Label
 			var act := row.get_node("Action") as Button
 			var st := row.get_node("Status") as Label
-			_refresh_skill_row(name, lv, act, st)
+			_refresh_skill_row(skill_name, lv, act, st)
 
 
 func _refresh_global_stats() -> void:
@@ -263,13 +263,13 @@ func _refresh_global_stats() -> void:
 
 func _on_reset() -> void:
 	SkillManager.reset_to_defaults()
-	for name in SKILL_NAMES:
-		var row := _skill_rows.get(name) as HBoxContainer
+	for skill_name in SKILL_NAMES:
+		var row := _skill_rows.get(skill_name) as HBoxContainer
 		if row:
 			var lv := row.get_node("Level") as Label
 			var act := row.get_node("Action") as Button
 			var st := row.get_node("Status") as Label
-			_refresh_skill_row(name, lv, act, st)
+			_refresh_skill_row(skill_name, lv, act, st)
 	_refresh_global_stats()
 
 

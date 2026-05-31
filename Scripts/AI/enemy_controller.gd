@@ -1,6 +1,6 @@
 extends CharacterBody3D
 
-enum State { IDLE, PATROL, SUSPICIOUS, ALERT, CHASE, KNOCKED_OUT }
+enum State { PATROL, SEARCH, PURSUIT, REVIVE, ALARM, GET_HELP, KNOCKED_OUT, DEAD }
 
 @export_group("Vision")
 @export var vision_range: float = 10.0:
@@ -17,7 +17,7 @@ enum State { IDLE, PATROL, SUSPICIOUS, ALERT, CHASE, KNOCKED_OUT }
 
 @export_group("Detection")
 @export var detection_max: float = 100.0
-@export var sight_detection_rate: float = 50.0
+@export var sight_detection_rate: float = 8.0
 @export var noise_detection_rate: float = 15.0
 @export var detection_decay: float = 10.0
 @export var alert_decay: float = 5.0
@@ -49,23 +49,30 @@ enum State { IDLE, PATROL, SUSPICIOUS, ALERT, CHASE, KNOCKED_OUT }
 @export var show_waypoints: bool = true
 @export var debug: bool = false
 
-var state: State = State.IDLE
+var state: State = State.PATROL
 var detection_meter: float = 0.0
 var last_known_player_pos: Vector3
 var player_in_sight: bool = false
 var patrol_index: int = 0
 var patrol_forward: bool = true
-var idle_timer: float = 0.0
 var being_revived: bool = false
 var revive_progress: float = 0.0
-var suspicious_target: Vector3
-var alertness_cooldown: float = 0.0
-var start_position: Vector3
-var patrol_paused: bool = false
-var patrol_pause_timer: float = 0.0
+var _search_target: Vector3
+var _has_last_known_pos: bool = false
+var _search_timer: float = 0.0
+var _priority_timer: float = 0.0
+var _current_revive_target: Node3D = null
+var _current_alarm_panel: Node3D = null
+var _get_help_target: Vector3
 var _investigate_timer: float = 0.0
 var _detection_bar_bg: MeshInstance3D
 var _detection_bar_fill: MeshInstance3D
+var _detection_bar_root: Node3D
+
+var dead: bool = false
+var start_position: Vector3
+var patrol_paused: bool = false
+var patrol_pause_timer: float = 0.0
 
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 var player: CharacterBody3D
@@ -89,6 +96,7 @@ signal enemy_revived(instigator)
 
 
 func _ready() -> void:
+	add_to_group("enemy")
 	nav_agent = $NavigationAgent3D
 	vision_area = $VisionArea
 	hearing_area = $HearingArea
@@ -109,7 +117,15 @@ func _ready() -> void:
 		for p in patrol_points:
 			print("  patrol: ", p.name, " global=", p.global_position)
 
-	_enter_idle()
+	_setup_takedown_indicator()
+	_enter_patrol()
+
+
+func _setup_takedown_indicator() -> void:
+	var Indicator := preload("res://Scripts/AI/TakedownIndicator.gd")
+	var ind := Indicator.new()
+	ind.name = "TakedownIndicator"
+	add_child(ind)
 
 
 func _setup_vision_area() -> void:
@@ -209,10 +225,10 @@ func _setup_vision_cone_debug() -> void:
 
 
 func _setup_detection_bar() -> void:
-	var root := Node3D.new()
-	root.name = "DetectionBar"
-	add_child(root)
-	root.position = Vector3(0, 1.2, 0)
+	_detection_bar_root = Node3D.new()
+	_detection_bar_root.name = "DetectionBar"
+	add_child(_detection_bar_root)
+	_detection_bar_root.position = Vector3(0, 1.2, 0)
 
 	var bg_mesh := BoxMesh.new()
 	bg_mesh.size = Vector3(1.0, 0.1, 0.02)
@@ -223,7 +239,7 @@ func _setup_detection_bar() -> void:
 	_detection_bar_bg = MeshInstance3D.new()
 	_detection_bar_bg.mesh = bg_mesh
 	_detection_bar_bg.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	root.add_child(_detection_bar_bg)
+	_detection_bar_root.add_child(_detection_bar_bg)
 
 	var fill_mesh := BoxMesh.new()
 	fill_mesh.size = Vector3(0.96, 0.08, 0.021)
@@ -235,7 +251,7 @@ func _setup_detection_bar() -> void:
 	_detection_bar_fill.mesh = fill_mesh
 	_detection_bar_fill.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_detection_bar_fill.position.x = -0.48
-	root.add_child(_detection_bar_fill)
+	_detection_bar_root.add_child(_detection_bar_fill)
 
 
 func _setup_debug_waypoints() -> void:
@@ -284,13 +300,14 @@ func _update_debug_waypoints() -> void:
 func _update_detection_bar() -> void:
 	if not _detection_bar_fill or not _detection_bar_bg:
 		return
-	var root := _detection_bar_bg.get_parent() as Node3D
-	if not root:
-		return
+	if not _detection_bar_root:
+		_detection_bar_root = _detection_bar_bg.get_parent() as Node3D
+		if not _detection_bar_root:
+			return
 	if detection_meter <= 0.0:
-		root.visible = false
+		_detection_bar_root.visible = false
 		return
-	root.visible = true
+	_detection_bar_root.visible = true
 	var pct := detection_meter / detection_max
 	_detection_bar_fill.scale.x = pct
 	_detection_bar_fill.position.x = -0.48 + 0.48 * pct
@@ -305,6 +322,13 @@ func _update_detection_bar() -> void:
 	var mat := _detection_bar_fill.mesh.surface_get_material(0) as StandardMaterial3D
 	if mat:
 		mat.albedo_color = color
+
+	var cam := get_viewport().get_camera_3d()
+	if cam:
+		var dir := cam.global_position - _detection_bar_root.global_position
+		dir.y = 0.0
+		if dir.length_squared() > 0.001:
+			_detection_bar_root.look_at(_detection_bar_root.global_position + dir, Vector3.UP)
 
 
 func _update_vision_cone_mesh() -> void:
@@ -330,7 +354,6 @@ func _update_vision_cone_mesh() -> void:
 
 	var verts := PackedVector3Array()
 
-	# Front face (tessellated grid)
 	for i in h_seg:
 		for j in v_seg:
 			var a := i * (v_seg + 1) + j
@@ -340,7 +363,6 @@ func _update_vision_cone_mesh() -> void:
 			verts.append(front[a]); verts.append(front[c]); verts.append(front[b])
 			verts.append(front[b]); verts.append(front[c]); verts.append(front[d])
 
-	# Side panels: apex to each perimeter edge
 	for i in h_seg:
 		var a := i * (v_seg + 1) + v_seg
 		var b := (i + 1) * (v_seg + 1) + v_seg
@@ -376,7 +398,7 @@ func _update_vision_cone_color() -> void:
 	if not _vision_cone_mat:
 		return
 	var c: Color
-	if state == State.CHASE:
+	if state == State.PURSUIT:
 		c = Color(1.0, 0.0, 0.0, 0.15)
 	elif player_in_sight and detection_meter > 0:
 		var intensity := minf(detection_meter / alert_threshold, 1.0)
@@ -386,12 +408,6 @@ func _update_vision_cone_color() -> void:
 	else:
 		c = Color(1.0, 0.85, 0.0, 0.12)
 	_vision_cone_mat.albedo_color = c
-
-
-func _enter_idle() -> void:
-	state = State.IDLE
-	idle_timer = randf_range(2.0, 5.0)
-	nav_agent.target_position = global_position
 
 
 func _on_vision_body_entered(body: Node) -> void:
@@ -413,43 +429,41 @@ func _on_hearing_body_exited(_body: Node) -> void:
 	pass
 
 
+# ── Physics ──────────────────────────────────────────────────────────
+
 func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= gravity * delta
 
+	if state == State.DEAD:
+		move_and_slide()
+		return
+
 	match state:
-		State.IDLE:
-			_process_idle(delta)
 		State.PATROL:
 			_process_patrol(delta)
-		State.SUSPICIOUS:
-			_process_suspicious(delta)
-		State.ALERT:
-			_process_alert(delta)
-		State.CHASE:
-			_process_chase(delta)
+		State.SEARCH:
+			_process_search(delta)
+		State.PURSUIT:
+			_process_pursuit(delta)
+		State.REVIVE:
+			_process_revive(delta)
+		State.ALARM:
+			_process_alarm(delta)
+		State.GET_HELP:
+			_process_get_help(delta)
 		State.KNOCKED_OUT:
 			_process_knocked_out(delta)
 
 	_update_detection(delta)
+	_evaluate_priority(delta)
 	_update_detection_bar()
 	_update_vision_cone_color()
 	_update_debug_waypoints()
 	move_and_slide()
 
 
-func _process_idle(delta: float) -> void:
-	idle_timer -= delta
-	if idle_timer <= 0.0:
-		if patrol_points.size() > 0:
-			if debug:
-				print("enemy: idle->patrol")
-			_enter_patrol()
-		else:
-			if debug:
-				print("enemy: idle timeout, no patrol points, re-idle")
-			idle_timer = randf_range(2.0, 5.0)
-
+# ── PATROL ───────────────────────────────────────────────────────────
 
 func _enter_patrol() -> void:
 	state = State.PATROL
@@ -462,12 +476,10 @@ func _pick_next_patrol_point() -> void:
 	if patrol_world_positions.size() == 0:
 		if debug:
 			print("enemy: pick patrol - empty")
-		_enter_idle()
+		nav_agent.target_position = global_position
 		return
 	if patrol_world_positions.size() == 1:
 		nav_agent.target_position = patrol_world_positions[0]
-		if debug:
-			print("enemy: patrol target (single) -> ", nav_agent.target_position)
 		return
 	if patrol_forward:
 		patrol_index += 1
@@ -500,12 +512,6 @@ func _pick_next_patrol_point() -> void:
 			tries += 1
 
 	nav_agent.target_position = target
-	if debug:
-		var map := nav_agent.get_navigation_map()
-		var path := NavigationServer3D.map_get_path(map, global_position, target, true)
-		print("enemy: patrol target idx=", patrol_index, " -> ", target, " path_nodes=", path.size())
-		for i in path.size():
-			print("  node[", i, "] = ", path[i])
 
 
 func _process_patrol(delta: float) -> void:
@@ -519,65 +525,46 @@ func _process_patrol(delta: float) -> void:
 			_pick_next_patrol_point()
 		return
 	if nav_agent.is_navigation_finished():
-		if debug:
-			print("enemy: patrol nav finished")
 		if randf() < patrol_pause_chance:
 			patrol_paused = true
 			patrol_pause_timer = randf_range(patrol_pause_min, patrol_pause_max)
-			if debug:
-				print("enemy: patrol pausing for %.1fs" % patrol_pause_timer)
 			velocity = Vector3.ZERO
 			return
 		_pick_next_patrol_point()
 	_move_toward_target(patrol_speed, delta)
 
 
-func _enter_suspicious(target_pos: Vector3) -> void:
-	state = State.SUSPICIOUS
-	suspicious_target = target_pos
+# ── SEARCH ───────────────────────────────────────────────────────────
+
+func _enter_search() -> void:
+	state = State.SEARCH
+	_search_timer = 0.0
+	_has_last_known_pos = true
+	if player_in_sight and player:
+		_search_target = player.global_position
+	elif player:
+		_search_target = player.global_position
+	if debug:
+		print("enemy: enter search - target=", _search_target)
 
 
-func _process_suspicious(delta: float) -> void:
+func _process_search(delta: float) -> void:
 	velocity = velocity.lerp(Vector3.ZERO, 4.0 * delta)
-	_rotate_look(suspicious_target, delta)
-	if detection_meter >= detection_max:
-		_enter_chase()
-	elif detection_meter <= 0.0:
-		if patrol_points.size() > 0:
-			_enter_patrol()
-		else:
-			_enter_idle()
+	_rotate_look(_search_target, delta)
+	_search_timer += delta
 
 
-func _enter_alert() -> void:
-	state = State.ALERT
-	alertness_cooldown = 10.0
-	_investigate_timer = 0.0
-	nav_agent.target_position = last_known_player_pos
-	enemy_spotted.emit(self)
+# ── PURSUIT ──────────────────────────────────────────────────────────
 
-
-func _process_alert(delta: float) -> void:
-	alertness_cooldown -= delta
-	if detection_meter >= detection_max:
-		_enter_chase()
-	elif alertness_cooldown <= 0.0 and detection_meter <= suspicious_threshold:
-		if patrol_points.size() > 0:
-			_enter_patrol()
-		else:
-			_enter_idle()
-	else:
-		if nav_agent.is_navigation_finished():
-			_update_last_known_pos()
-		_move_toward_target(chase_speed, delta)
-
-
-func _enter_chase() -> void:
-	state = State.CHASE
+func _enter_pursuit() -> void:
+	state = State.PURSUIT
+	_has_last_known_pos = true
 	nav_agent.target_position = last_known_player_pos
 	alarm_triggered.emit(self)
 	enemy_spotted.emit(self)
 	_call_for_help()
+	if debug:
+		print("enemy: enter pursuit", " pos=", last_known_player_pos)
 
 
 func _call_for_help() -> void:
@@ -590,23 +577,27 @@ func _call_for_help() -> void:
 
 
 func respond_to_alarm(caller) -> void:
-	if state == State.KNOCKED_OUT or state == State.CHASE:
+	if state in [State.KNOCKED_OUT, State.DEAD, State.PURSUIT]:
 		return
-	if state == State.ALERT or state == State.SUSPICIOUS:
+	if state == State.SEARCH:
 		detection_meter = maxf(detection_meter, alert_threshold)
-	_enter_alert()
+	_enter_search()
 	last_known_player_pos = caller.last_known_player_pos if caller.has_method("get_last_known_pos") else caller.global_position
-	nav_agent.target_position = last_known_player_pos
+	_search_target = last_known_player_pos
+	_has_last_known_pos = true
+	_search_timer = 0.0
 
 
 func get_last_known_pos() -> Vector3:
 	return last_known_player_pos
 
 
-func _process_chase(delta: float) -> void:
+func _process_pursuit(delta: float) -> void:
 	if player and _check_vision():
 		last_known_player_pos = player.global_position
 		nav_agent.target_position = last_known_player_pos
+		_search_target = last_known_player_pos
+		_search_timer = 0.0
 		_investigate_timer = 0.0
 		_move_toward_target(chase_speed, delta)
 		return
@@ -622,9 +613,358 @@ func _process_chase(delta: float) -> void:
 		_return_to_nearest_patrol()
 
 
+# ── REVIVE ───────────────────────────────────────────────────────────
+
+func _enter_revive(target: Node3D) -> void:
+	state = State.REVIVE
+	_current_revive_target = target
+	nav_agent.target_position = target.global_position
+	if debug:
+		print("enemy: enter revive")
+
+
+func _process_revive(delta: float) -> void:
+	if not _current_revive_target or not is_instance_valid(_current_revive_target):
+		_return_to_patrol()
+		return
+	var target = _current_revive_target
+	if not target.can_be_revived():
+		_return_to_patrol()
+		return
+	var dist := global_position.distance_to(target.global_position)
+	if dist <= target_reached_distance:
+		velocity = Vector3.ZERO
+		_rotate_look(target.global_position, delta)
+		target.revive_check(self)
+		_return_to_patrol()
+	else:
+		_move_toward_target(patrol_speed, delta)
+
+
+# ── ALARM ────────────────────────────────────────────────────────────
+
+func _enter_alarm(panel: Node3D) -> void:
+	state = State.ALARM
+	_current_alarm_panel = panel
+	nav_agent.target_position = panel.global_position
+	if debug:
+		print("enemy: enter alarm")
+
+
+func _process_alarm(delta: float) -> void:
+	if not _current_alarm_panel or not is_instance_valid(_current_alarm_panel):
+		_return_to_patrol()
+		return
+	var dist := global_position.distance_to(_current_alarm_panel.global_position)
+	if dist <= target_reached_distance:
+		velocity = Vector3.ZERO
+		if debug:
+			print("enemy: triggered alarm")
+		alarm_triggered.emit(self)
+		_return_to_patrol()
+	else:
+		_move_toward_target(patrol_speed, delta)
+
+
+# ── GET HELP ─────────────────────────────────────────────────────────
+
+func _enter_get_help() -> void:
+	state = State.GET_HELP
+	if patrol_world_positions.size() > 0:
+		_get_help_target = patrol_world_positions[randi() % patrol_world_positions.size()]
+		nav_agent.target_position = _get_help_target
+	else:
+		_get_help_target = global_position
+	if debug:
+		print("enemy: enter get_help")
+
+
+func _process_get_help(delta: float) -> void:
+	if not _is_alone():
+		_return_to_patrol()
+		return
+	if nav_agent.is_navigation_finished():
+		state = State.PATROL
+		_pick_next_patrol_point()
+		return
+	_move_toward_target(patrol_speed, delta)
+
+
+# ── KNOCKED OUT ──────────────────────────────────────────────────────
+
+func _process_knocked_out(delta: float) -> void:
+	if dead:
+		return
+	if being_revived:
+		revive_progress += delta / revive_time
+		if revive_progress >= 1.0:
+			_revive()
+
+
+func _lay_down() -> void:
+	if _detection_bar_bg:
+		_detection_bar_bg.visible = false
+	if _detection_bar_fill:
+		_detection_bar_fill.visible = false
+	if vision_cone_mesh:
+		vision_cone_mesh.visible = false
+	if vision_area and vision_area.get_child_count() > 0:
+		for c in vision_area.get_children():
+			if c is CollisionShape3D:
+				c.disabled = true
+	var tween := create_tween()
+	tween.set_ease(Tween.EASE_OUT)
+	tween.set_trans(Tween.TRANS_CUBIC)
+	tween.tween_property(self, "rotation:x", deg_to_rad(90.0), 0.5)
+
+
+func knock_out() -> void:
+	state = State.KNOCKED_OUT
+	being_revived = false
+	revive_progress = 0.0
+	detection_meter = 0.0
+	_has_last_known_pos = false
+	nav_agent.target_position = global_position
+	velocity = Vector3.ZERO
+	_lay_down()
+	if debug:
+		print("enemy: knocked out")
+
+
+func kill() -> void:
+	state = State.DEAD
+	dead = true
+	being_revived = false
+	revive_progress = 0.0
+	detection_meter = 0.0
+	_has_last_known_pos = false
+	nav_agent.target_position = global_position
+	velocity = Vector3.ZERO
+	_lay_down()
+	if debug:
+		print("enemy: killed")
+
+
+func is_eligible_for_takedown() -> bool:
+	return state in [State.PATROL, State.SEARCH]
+
+
+func is_draggable() -> bool:
+	return state in [State.KNOCKED_OUT, State.DEAD]
+
+
+func is_conscious() -> bool:
+	return state not in [State.KNOCKED_OUT, State.DEAD]
+
+
+func can_be_revived() -> bool:
+	return state == State.KNOCKED_OUT and not being_revived and not dead
+
+
+func revive_check(reviver) -> bool:
+	if state != State.KNOCKED_OUT or being_revived:
+		return false
+	being_revived = true
+	revive_progress = 0.0
+	reviver.enemy_revived.emit(self)
+	return true
+
+
+func _revive() -> void:
+	state = State.SEARCH
+	detection_meter = alert_threshold
+	_search_target = last_known_player_pos
+	_has_last_known_pos = true
+	_search_timer = 0.0
+	being_revived = false
+	revive_progress = 0.0
+	enemy_revived.emit(self)
+	if debug:
+		print("enemy: revived into search")
+
+
+# ── Detection ────────────────────────────────────────────────────────
+
+func _update_detection(delta: float) -> void:
+	if state in [State.KNOCKED_OUT, State.DEAD]:
+		return
+
+	var detected_this_frame := false
+
+	if _check_vision():
+		detected_this_frame = true
+		var dist := 1.0
+		if player:
+			dist = global_position.distance_to(player.global_position)
+		var dist_factor := 2.0 - (dist / vision_range) * 1.5
+		var move_factor := movement_multiplier if _is_player_moving() else 1.0
+		var crouch_factor := 0.8 if player and player.has_method("is_crouching") and player.is_crouching() else 1.0
+		var rate := sight_detection_rate * dist_factor * move_factor * crouch_factor * delta
+		detection_meter = minf(detection_meter + rate, detection_max)
+		if state == State.SEARCH and player:
+			_search_target = player.global_position
+		last_known_player_pos = player.global_position if player else global_position
+		_has_last_known_pos = true
+
+	if not detected_this_frame and _check_hearing():
+		detected_this_frame = true
+		var noise_level := _get_player_noise()
+		if noise_level >= hearing_threshold:
+			var rate := noise_detection_rate * (noise_level / detection_max) * delta
+			detection_meter = minf(detection_meter + rate, detection_max)
+			if player:
+				_search_target = player.global_position
+				_has_last_known_pos = true
+
+	if not detected_this_frame:
+		var decay := alert_decay if state == State.PURSUIT else detection_decay
+		detection_meter = maxf(detection_meter - decay * delta, 0.0)
+
+	_handle_state_transitions(detected_this_frame)
+
+
+func _handle_state_transitions(detected: bool) -> void:
+	if state in [State.KNOCKED_OUT, State.DEAD]:
+		return
+
+	if state == State.PATROL and detected:
+		_enter_search()
+		return
+
+	if state == State.SEARCH:
+		if player_in_sight and player:
+			_search_target = player.global_position
+			_search_timer = 0.0
+		if detection_meter >= detection_max:
+			_enter_pursuit()
+			return
+		if not detected and detection_meter <= 0.0 and _search_timer >= 10.0:
+			_return_to_patrol()
+		return
+
+	if state == State.PURSUIT and not detected:
+		if detection_meter <= alert_threshold:
+			_has_last_known_pos = true
+			_search_timer = 0.0
+			_enter_search()
+		return
+
+
+# ── Priority Evaluation ──────────────────────────────────────────────
+
+func _get_state_priority(s: State) -> int:
+	match s:
+		State.DEAD, State.KNOCKED_OUT:
+			return -1
+		State.PURSUIT:
+			return 6
+		State.REVIVE:
+			return 5
+		State.ALARM:
+			return 4
+		State.SEARCH:
+			return 3
+		State.GET_HELP:
+			return 2
+		State.PATROL:
+			return 1
+	return 0
+
+
+func _evaluate_priority(delta: float) -> void:
+	if state in [State.KNOCKED_OUT, State.DEAD]:
+		return
+	_priority_timer -= delta
+	if _priority_timer > 0.0:
+		return
+	_priority_timer = 0.5
+
+	if detection_meter >= detection_max:
+		if state != State.PURSUIT:
+			_enter_pursuit()
+		return
+
+	if state != State.PURSUIT:
+		var ally := _find_revive_ally()
+		if ally and state != State.REVIVE:
+			_enter_revive(ally)
+			return
+
+	if state not in [State.PURSUIT, State.REVIVE]:
+		var alarm := _find_alarm_panel()
+		if alarm and state != State.ALARM:
+			_enter_alarm(alarm)
+			return
+
+	if _has_last_known_pos and _search_timer < 10.0:
+		if _get_state_priority(state) < 3:
+			_enter_search()
+			return
+	else:
+		_has_last_known_pos = false
+
+
+func _find_revive_ally() -> Node3D:
+	var enemies := get_tree().get_nodes_in_group("enemy")
+	for node in enemies:
+		var e := node as CharacterBody3D
+		if not e or e == self:
+			continue
+		if e.has_method("can_be_revived") and e.can_be_revived():
+			var dist := global_position.distance_to(e.global_position)
+			if dist <= vision_range:
+				var epos := e.global_position
+				var dir_to := (epos - global_position).normalized()
+				var forward := -global_transform.basis.z
+				var angle := rad_to_deg(acos(clampf(dir_to.dot(forward), -1.0, 1.0)))
+				if angle <= vision_angle_h:
+					var space := get_world_3d().direct_space_state
+					var from := global_position + Vector3(0, 0.9, 0)
+					var target_pos := epos + Vector3(0, 0.9, 0)
+					var query := PhysicsRayQueryParameters3D.create(from, target_pos, 1)
+					var result := space.intersect_ray(query)
+					if result.is_empty() or result.collider == e:
+						return e
+	return null
+
+
+func _find_alarm_panel() -> Node3D:
+	return null
+
+
+func _is_alone() -> bool:
+	var enemies := get_tree().get_nodes_in_group("enemy")
+	for e in enemies:
+		if e == self:
+			continue
+		if e is CharacterBody3D and e.has_method("is_conscious") and e.is_conscious():
+			if e.global_position.distance_to(global_position) < hearing_range:
+				return false
+	return true
+
+
+# ── Return to Patrol ─────────────────────────────────────────────────
+
+func _return_to_patrol() -> void:
+	_has_last_known_pos = false
+	_search_timer = 0.0
+	_current_revive_target = null
+	_current_alarm_panel = null
+	_investigate_timer = 0.0
+	if _is_alone() and patrol_world_positions.size() > 0:
+		_enter_get_help()
+		return
+	if patrol_world_positions.size() > 0:
+		_return_to_nearest_patrol()
+	else:
+		state = State.PATROL
+		nav_agent.target_position = global_position
+
+
 func _return_to_nearest_patrol() -> void:
 	if patrol_world_positions.size() == 0:
-		_enter_idle()
+		state = State.PATROL
+		nav_agent.target_position = global_position
 		return
 	state = State.PATROL
 	patrol_paused = false
@@ -642,120 +982,12 @@ func _return_to_nearest_patrol() -> void:
 	if global_position.distance_to(target) <= target_reached_distance:
 		patrol_paused = true
 		patrol_pause_timer = randf_range(1.0, 2.0)
-		if debug:
-			print("enemy: already at nearest patrol, pausing")
 		velocity = Vector3.ZERO
 		return
 	nav_agent.target_position = target
-	if debug:
-		print("enemy: return to nearest patrol idx=", patrol_index, " ", nav_agent.target_position)
 
 
-func _process_knocked_out(delta: float) -> void:
-	if being_revived:
-		revive_progress += delta / revive_time
-		if revive_progress >= 1.0:
-			_revive()
-
-
-func knock_out() -> void:
-	state = State.KNOCKED_OUT
-	being_revived = false
-	revive_progress = 0.0
-	detection_meter = 0.0
-	nav_agent.target_position = global_position
-
-
-func revive_check(reviver) -> bool:
-	if state != State.KNOCKED_OUT or being_revived:
-		return false
-	being_revived = true
-	revive_progress = 0.0
-	reviver.enemy_revived.emit(self)
-	return true
-
-
-func _revive() -> void:
-	state = State.ALERT
-	detection_meter = alert_threshold
-	being_revived = false
-	revive_progress = 0.0
-	enemy_revived.emit(self)
-
-
-func _update_detection(delta: float) -> void:
-	if state == State.KNOCKED_OUT:
-		return
-
-	var detected_this_frame := false
-
-	if _check_vision():
-		detected_this_frame = true
-		var dist := 1.0
-		if player:
-			dist = global_position.distance_to(player.global_position)
-		var dist_factor := 2.0 - (dist / vision_range) * 1.5
-		var move_factor := movement_multiplier if _is_player_moving() else 1.0
-		var crouch_factor := 0.8 if player and player.has_method("is_crouching") and player.is_crouching() else 1.0
-		var rate := sight_detection_rate * dist_factor * move_factor * crouch_factor * delta
-		detection_meter = minf(detection_meter + rate, detection_max)
-		if state == State.SUSPICIOUS and player:
-			suspicious_target = player.global_position
-		last_known_player_pos = player.global_position if player else global_position
-
-	if not detected_this_frame and _check_hearing():
-		detected_this_frame = true
-		var noise_level := _get_player_noise()
-		if noise_level >= hearing_threshold:
-			var rate := noise_detection_rate * (noise_level / detection_max) * delta
-			detection_meter = minf(detection_meter + rate, detection_max)
-			if player:
-				suspicious_target = player.global_position
-
-	if not detected_this_frame:
-		var decay := alert_decay if state == State.ALERT or state == State.CHASE else detection_decay
-		detection_meter = maxf(detection_meter - decay * delta, 0.0)
-
-	_handle_state_transitions(detected_this_frame)
-
-
-func _handle_state_transitions(detected: bool) -> void:
-	if state == State.KNOCKED_OUT:
-		return
-
-	if state == State.IDLE and detected:
-		if player:
-			_enter_suspicious(last_known_player_pos if player_in_sight else player.global_position)
-		return
-
-	if state == State.PATROL and detected:
-		if player_in_sight:
-			_enter_suspicious(last_known_player_pos)
-		elif player:
-			suspicious_target = player.global_position
-			_enter_suspicious(suspicious_target)
-		return
-
-	if state == State.SUSPICIOUS:
-		if detection_meter >= detection_max:
-			_enter_chase()
-		elif detection_meter <= 0 and not detected:
-			if patrol_points.size() > 0:
-				_enter_patrol()
-			else:
-				_enter_idle()
-		return
-
-	if state == State.ALERT:
-		if detection_meter >= detection_max:
-			_enter_chase()
-		return
-
-	if state == State.CHASE and not detected:
-		if detection_meter <= alert_threshold:
-			_enter_alert()
-		return
-
+# ── Vision / Hearing ─────────────────────────────────────────────────
 
 func _check_vision() -> bool:
 	if not player:
@@ -825,6 +1057,8 @@ func _update_last_known_pos() -> void:
 		nav_agent.target_position = last_known_player_pos
 
 
+# ── Movement ─────────────────────────────────────────────────────────
+
 func _move_toward_target(speed: float, delta: float) -> void:
 	if nav_agent.is_navigation_finished():
 		if debug and velocity.length_squared() > 0.0:
@@ -870,3 +1104,23 @@ func _rotate_look(target: Vector3, delta: float) -> void:
 	if dir.length_squared() > 0.0:
 		var target_basis := Basis.looking_at(dir, Vector3.UP)
 		transform.basis = transform.basis.slerp(target_basis, turn_rate * delta)
+
+
+# ── Takedown Indicator ───────────────────────────────────────────────
+
+func show_takedown_indicators(state: bool) -> void:
+	var ind := find_child("TakedownIndicator", true, false)
+	if ind and ind.has_method("show_indicators"):
+		ind.show_indicators(state)
+
+
+func set_indicator_mode(mode: String) -> void:
+	var ind := find_child("TakedownIndicator", true, false)
+	if ind and ind.has_method("set_mode"):
+		ind.set_mode(mode)
+
+
+func update_hold_progress(pct: float) -> void:
+	var ind := find_child("TakedownIndicator", true, false)
+	if ind and ind.has_method("update_hold_progress"):
+		ind.update_hold_progress(pct)
