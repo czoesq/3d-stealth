@@ -5,7 +5,7 @@ extends Node3D
 @export var knockout_hold_time: float = 1.0
 @export var takedown_anim_time: float = 0.5
 @export var drag_hold_time: float = 0.5
-@export var drag_follow_distance: float = 1.5
+@export var drag_follow_distance: float = 2.0
 
 enum TargetType { NONE, TAKEDOWN, DRAG }
 
@@ -103,9 +103,13 @@ func _process_drag(delta: float) -> void:
 		return
 
 	var player_fwd := -player.global_transform.basis.z
-	var target_pos := player.global_position - player_fwd * drag_follow_distance
-	target_pos.y = _dragged_enemy.global_position.y
-	_dragged_enemy.global_position = _dragged_enemy.global_position.lerp(target_pos, 10.0 * delta)
+	var desired_pos := player.global_position - player_fwd * drag_follow_distance
+	var offset := desired_pos - _dragged_enemy.global_position
+	offset.y = 0.0
+
+	var correction := offset * 5.0
+	_dragged_enemy.velocity = player.velocity + correction
+	_dragged_enemy.velocity.y = 0.0
 
 
 func _start_drag(enemy: Node3D) -> void:
@@ -115,9 +119,13 @@ func _start_drag(enemy: Node3D) -> void:
 	_clear_indicators()
 	if enemy.has_method("update_hold_progress"):
 		enemy.update_hold_progress(0.0)
+	if "dragging" in player:
+		player.dragging = true
 
 
 func _drop_enemy() -> void:
+	if "dragging" in player:
+		player.dragging = false
 	dragging = false
 	_dragged_enemy = null
 

@@ -14,8 +14,8 @@ Token-preserving reference. Update when files change.
 │   │   ├── enemy_controller.gd        # 1126 lines: enemy AI state machine
 │   │   └── TakedownIndicator.gd       # 137 lines: billboard panels above enemy
 │   ├── Player/
-│   │   ├── player_controller.gd       # 254 lines: player movement, invisibility, takedown setup
-│   │   └── PlayerTakedownController.gd # 264 lines: takedown + drag interaction
+│   │   ├── player_controller.gd       # 257 lines: player movement, invisibility, takedown setup, dragging flag
+│   │   └── PlayerTakedownController.gd # 298 lines: takedown + drag interaction, player.dragging set/reset
 │   ├── Navigation/ground_nav.gd       # 44 lines: runtime navmesh baking
 │   ├── Camera/camera_follow.gd        # 21 lines: ortho camera follow
 │   ├── Skills/
@@ -129,6 +129,7 @@ TestWorld (Node3D)
 
 **Takedown integration**:
 - `takedown_active: bool` — when true, `_physics_process` zeros velocity and returns
+- `dragging: bool` — when true, `_get_speed()` returns `crouch_speed`
 - `set_takedown_active(active)` — called by PlayerTakedownController during takedown anim
 - `_setup_takedown_controller()` — instantiates PlayerTakedownController as child
 
@@ -148,7 +149,7 @@ TestWorld (Node3D)
 | Near KO'd/dead body | — | Hold 0.5s to start dragging |
 | While dragging | — | Tap to drop body |
 
-**Drag behavior**: Body follows 1.5m behind player with lerp smoothing. Drop enemy via E tap.
+**Drag behavior**: Body follows 2.0m behind player via velocity matching. Player moves at crouch speed while dragging. Drop enemy via E tap. `CollisionShape3D` left enabled (no more disable/enable toggle).
 
 **Indicators**: Interfaces with enemy's TakedownIndicator child via `show_takedown_indicators()`, `set_indicator_mode()`, `update_hold_progress()`.
 
@@ -183,9 +184,10 @@ Camera-facing via `_process()` with Basis.looking_at().
 | lethal_takedown | Q | PlayerTakedownController |
 
 ## Known Issues / Gotchas
-1. Groups from instanced `.tscn` files NOT propagated — enemy calls `add_to_group("enemy")` in `_ready()`, player calls `add_to_group("player")`.
-2. VisionRay at y=0.9 gives world y=1.8 (top of 1.8m capsule).
-3. `_on_vision_body_exited` does NOT clear `player` ref, only `player_in_sight`. Ref persists for hearing.
-4. `nav_agent.get_next_path_position()` returns `Vector3.ZERO` if no valid path — guarded in `_move_toward_target()`.
-5. `SkillSaveData.tres` saved to `user://` — check `~/.local/share/godot/app_userdata/3d Stealth/`.
-6. `SkillManager` uses `preload()` for save data class (not `class_name` directly) to avoid autoload resolution ordering issues.
+1. `drag_follow_distance = 2.0` — enemy may still clip through walls during sharp turns (velocity-matching drag keeps CollisionShape3D enabled).
+2. Groups from instanced `.tscn` files NOT propagated — enemy calls `add_to_group("enemy")` in `_ready()`, player calls `add_to_group("player")`.
+3. VisionRay at y=0.9 gives world y=1.8 (top of 1.8m capsule).
+4. `_on_vision_body_exited` does NOT clear `player` ref, only `player_in_sight`. Ref persists for hearing.
+5. `nav_agent.get_next_path_position()` returns `Vector3.ZERO` if no valid path — guarded in `_move_toward_target()`.
+6. `SkillSaveData.tres` saved to `user://` — check `~/.local/share/godot/app_userdata/3d Stealth/`.
+7. `SkillManager` uses `preload()` for save data class (not `class_name` directly) to avoid autoload resolution ordering issues.

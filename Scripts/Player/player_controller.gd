@@ -47,6 +47,7 @@ var player_visible: bool = true
 var invisible_to_ai: bool = false
 
 var takedown_active: bool = false
+var dragging: bool = false
 var collision_shape: CollisionShape3D
 @onready var camera: Camera3D = get_viewport().get_camera_3d()
 
@@ -134,6 +135,8 @@ func _get_input_direction() -> Vector2:
 
 
 func _get_speed() -> float:
+	if dragging:
+		return crouch_speed
 	if crouching:
 		return crouch_speed
 	if sprinting:
