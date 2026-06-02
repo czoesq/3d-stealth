@@ -25,6 +25,14 @@ extends CharacterBody3D
 @export var crouch_transition_speed: float = 8.0
 var normal_collision_height: float = 1.8
 
+@export_group("Stamina")
+@export var max_stamina: float = 100.0
+@export var stamina_drain_rate: float = 20.0
+@export var stamina_recharge_rate: float = 25.0
+
+@export_group("Health")
+@export var max_health: float = 100.0
+
 @export_group("Sprint Noise")
 @export var sprint_noise_rate: float = 1.0
 @export var max_noise: float = 100.0
@@ -49,6 +57,12 @@ var invisible_to_ai: bool = false
 var takedown_active: bool = false
 var dragging: bool = false
 var collision_shape: CollisionShape3D
+var _outline_mesh: MeshInstance3D
+var _occlusion_timer: float = 0.0
+
+var stamina: float = 100.0
+var health: float = 100.0
+
 @onready var camera: Camera3D = get_viewport().get_camera_3d()
 
 
@@ -57,6 +71,9 @@ signal noise_generated(amount: float, world_position: Vector3)
 signal movement_state_changed(state: String)
 signal detected
 signal player_visibility_changed(visible: bool)
+signal stamina_changed(current: float, max_val: float)
+signal stamina_depleted
+signal health_changed(current: float, max_val: float)
 
 
 func _ready() -> void:
@@ -67,8 +84,14 @@ func _ready() -> void:
 
 	current_stealth = max_stealth
 	stealth_changed.emit(current_stealth)
+	stamina = max_stamina
+	stamina_changed.emit(stamina, max_stamina)
+	health = max_health
+	health_changed.emit(health, max_health)
 
 	_setup_takedown_controller()
+	_setup_outline()
+	_setup_hud()
 
 
 func _setup_takedown_controller() -> void:
@@ -76,6 +99,70 @@ func _setup_takedown_controller() -> void:
 	var ctrl := TakedownCtrl.new()
 	ctrl.name = "PlayerTakedownController"
 	add_child(ctrl)
+
+
+func _setup_hud() -> void:
+	var HUD := preload("res://Scripts/UI/PlayerHUD.gd")
+	var hud := HUD.new()
+	hud.name = "PlayerHUD"
+	add_child(hud)
+
+
+func _setup_outline() -> void:
+	var original_mesh := $MeshInstance3D as MeshInstance3D
+	if not original_mesh or not original_mesh.mesh is CapsuleMesh:
+		return
+	var cap := original_mesh.mesh as CapsuleMesh
+	var dup_mesh := CapsuleMesh.new()
+	dup_mesh.height = cap.height
+	dup_mesh.radius = cap.radius
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://Shaders/player_outline.gdshader")
+	_outline_mesh = MeshInstance3D.new()
+	_outline_mesh.name = "OutlineMesh"
+	_outline_mesh.mesh = dup_mesh
+	_outline_mesh.material_override = mat
+	add_child(_outline_mesh)
+
+
+func _update_outline_occlusion() -> void:
+	if not _outline_mesh or not camera:
+		return
+
+	_occlusion_timer -= get_physics_process_delta_time()
+	if _occlusion_timer > 0.0:
+		return
+	_occlusion_timer = 0.1
+
+	var space := get_world_3d().direct_space_state
+	if not space:
+		_outline_mesh.visible = false
+		return
+
+	var origin := camera.global_position
+	var num_samples := 32
+	var data: Array[float] = []
+	data.resize(num_samples)
+	var any_occluded := false
+
+	for i in num_samples:
+		var h := -0.9 + 1.8 * float(i) / float(num_samples - 1)
+		var p := global_position + Vector3(0, h, 0)
+		var dist := origin.distance_to(p)
+		var query := PhysicsRayQueryParameters3D.create(origin, p)
+		query.exclude = [self]
+		var hit := space.intersect_ray(query)
+		if hit and origin.distance_to(hit.position) < dist - 0.05:
+			data[i] = 1.0
+			any_occluded = true
+		else:
+			data[i] = 0.0
+
+	var mat := _outline_mesh.material_override as ShaderMaterial
+	if mat:
+		mat.set_shader_parameter("occlusion_data", data)
+
+	_outline_mesh.visible = any_occluded
 
 
 func _physics_process(delta: float) -> void:
@@ -96,8 +183,10 @@ func _physics_process(delta: float) -> void:
 	_rotate_to_movement(move_dir, delta)
 
 	_update_crouch_collision(delta)
+	_update_stamina(delta)
 	_update_stealth(delta)
 	_update_noise(delta)
+	_update_outline_occlusion()
 	was_on_floor = is_on_floor()
 
 
@@ -115,6 +204,9 @@ func _handle_state_toggles() -> void:
 	if Input.is_action_just_pressed("crouch_toggle"):
 		crouching = not crouching
 		movement_state_changed.emit("crouch" if crouching else "walk")
+		if crouching and sprinting:
+			sprinting = false
+			movement_state_changed.emit("crouch")
 
 	if Input.is_action_just_pressed("toggle_invisibility"):
 		invisible_to_ai = not invisible_to_ai
@@ -122,8 +214,14 @@ func _handle_state_toggles() -> void:
 	if Input.is_action_just_pressed("skill_debug_toggle"):
 		_toggle_skill_debug()
 
-	var moving := _get_input_direction().length_squared() > 0.01
-	sprinting = Input.is_action_pressed("sprint") and not crouching and moving
+	if Input.is_action_just_pressed("sprint"):
+		if sprinting:
+			sprinting = false
+			movement_state_changed.emit("walk" if not crouching else "crouch")
+		elif stamina > 0.0:
+			crouching = false
+			sprinting = true
+			movement_state_changed.emit("sprint")
 
 
 func _get_input_direction() -> Vector2:
@@ -188,6 +286,29 @@ func _update_crouch_collision(delta: float) -> void:
 	capsule.height = move_toward(capsule.height, target_height, crouch_transition_speed * delta)
 
 
+func _update_stamina(delta: float) -> void:
+	if sprinting and _get_input_direction().length_squared() > 0.01:
+		stamina = maxf(stamina - stamina_drain_rate * delta, 0.0)
+		stamina_changed.emit(stamina, max_stamina)
+		if stamina <= 0.0:
+			sprinting = false
+			movement_state_changed.emit("walk" if not crouching else "crouch")
+			stamina_depleted.emit()
+	elif stamina < max_stamina:
+		stamina = minf(stamina + stamina_recharge_rate * delta, max_stamina)
+		stamina_changed.emit(stamina, max_stamina)
+
+
+func take_damage(amount: float) -> void:
+	health = maxf(health - amount, 0.0)
+	health_changed.emit(health, max_health)
+
+
+func heal(amount: float) -> void:
+	health = minf(health + amount, max_health)
+	health_changed.emit(health, max_health)
+
+
 func _update_stealth(delta: float) -> void:
 	## Recovery when not actively detected.
 	## Hook: Check detection system status here —
@@ -235,6 +356,8 @@ func emit_noise(amount: float) -> void:
 ## Hook: Replace with actual light/shadow and line-of-sight calculation.
 func get_visibility_factor() -> float:
 	return 0.0 if not player_visible else 1.0
+
+
 
 func _toggle_skill_debug() -> void:
 	var existing := get_tree().current_scene.find_child("SkillDebugUI", false, false)

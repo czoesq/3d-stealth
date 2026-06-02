@@ -11,18 +11,19 @@ Token-preserving reference. Update when files change.
 ├── icon.svg
 ├── Scripts/
 │   ├── AI/
-│   │   ├── enemy_controller.gd        # 1126 lines: enemy AI state machine
-│   │   └── TakedownIndicator.gd       # 137 lines: billboard panels above enemy
+│   │   ├── enemy_controller.gd        # 1152 lines: enemy AI state machine
+│   │   └── TakedownIndicator.gd       # 174 lines: billboard panels above enemy
 │   ├── Player/
-│   │   ├── player_controller.gd       # 257 lines: player movement, invisibility, takedown setup, dragging flag
-│   │   └── PlayerTakedownController.gd # 298 lines: takedown + drag interaction, player.dragging set/reset
+│   │   ├── player_controller.gd       # 380 lines: player movement, invisibility, sprint toggle, stamina, health, outline occlusion
+│   │   └── PlayerTakedownController.gd # 324 lines: takedown + drag interaction, player.dragging set/reset
 │   ├── Navigation/ground_nav.gd       # 44 lines: runtime navmesh baking
 │   ├── Camera/camera_follow.gd        # 21 lines: ortho camera follow
 │   ├── Skills/
 │   │   ├── SkillSaveData.gd           # 22 lines: serializable resource
 │   │   └── SkillManager.gd            # 143 lines: autoload skill system
 │   └── UI/
-│       ├── SkillDebugUI.gd            # 268 lines: L-key debug panel
+│       ├── PlayerHUD.gd               # 129 lines: HUD with stance icon, stamina bar, health bar
+│       ├── SkillDebugUI.gd            # 277 lines: L-key debug panel
 │       └── (editor theme files)
 ├── Prefabs/
 │   ├── Enemy/enemy.tscn               # Enemy scene (72 lines)
@@ -125,13 +126,31 @@ TestWorld (Node3D)
 **Known issue**: Groups from `.tscn` instances NOT propagated — `add_to_group("enemy")` called in `_ready()`.
 
 ### player_controller.gd
-**Role**: Player movement (WASD), sprint (Shift), crouch (C), jump (Space), invisibility toggle (G), L key for skill debug.
+**Role**: Player movement (WASD), sprint toggle (Shift), crouch (C), jump (Space), invisibility toggle (G), L key for skill debug.
+
+**Movement states**: `crouching`, `sprinting` (toggle), `dragging`. Sprint auto-disables crouch; sprinting while moving drains stamina.
+
+**Stamina** (`max_stamina=100`):
+- `stamina_drain_rate=20/s` while sprinting+moving (5s max sprint)
+- `stamina_recharge_rate=25/s` when not sprinting
+- Depletion forces sprint off, emits `stamina_depleted`
+- Signals: `stamina_changed(current, max_val)`
+
+**Health** (`max_health=100`):
+- `take_damage(amount)` / `heal(amount)` methods
+- Signal: `health_changed(current, max_val)`
+
+**Outline occlusion** (`_update_outline_occlusion()` runs every 0.1s):
+- Casts 32 raycasts from camera to capsule heights
+- Stores occlusion (0.0/1.0) in `PackedFloat32Array` → `set_shader_parameter("occlusion_data")`
+- Sets `_outline_mesh.visible` to false when no occlusion (fully visible)
 
 **Takedown integration**:
 - `takedown_active: bool` — when true, `_physics_process` zeros velocity and returns
 - `dragging: bool` — when true, `_get_speed()` returns `crouch_speed`
 - `set_takedown_active(active)` — called by PlayerTakedownController during takedown anim
 - `_setup_takedown_controller()` — instantiates PlayerTakedownController as child
+- `_setup_hud()` — instantiates PlayerHUD as child (CanvasLayer)
 
 ### PlayerTakedownController.gd
 **Role**: Handles all enemy interaction — takedowns (lethal + knockout) and body dragging.
@@ -165,6 +184,18 @@ TestWorld (Node3D)
 
 Camera-facing via `_process()` with Basis.looking_at().
 
+### PlayerHUD.gd
+**Role**: Bottom-left HUD with stance indicator, stamina bar, health bar.
+
+**Layout**: CanvasLayer → Control root. Responsive via `Viewport.size_changed`.
+
+**Elements**:
+- StanceIcon (TextureRect) — cycles crouch/walk/sprint icons (`UI/HUD/icon-{crouching,walking,sprinting}.png`)
+- Stamina bar (ColorRect bg + fill) — yellow fill, hidden at 100%, flashes white on depletion
+- Health bar (ColorRect bg + fill) — green fill, faded at 100%
+
+**Wiring**: Finds player via `"player"` group, connects to `movement_state_changed`, `stamina_changed`, `stamina_depleted`, `health_changed` signals.
+
 ### ground_nav.gd
 **Role**: Runtime navmesh baking from all StaticBody3D colliders. `agent_max_climb = 0.5`, `agent_radius = 0.5`, `agent_height = 2.0`.
 
@@ -176,7 +207,7 @@ Camera-facing via `_process()` with Basis.looking_at().
 |--------|-----|---------|
 | move_left/right/forward/back | A/D/W/S | player_controller |
 | jump | Space | player_controller |
-| sprint | Shift | player_controller |
+| sprint | Shift (toggle) | player_controller — tap to start/stop, also uncrouches |
 | crouch_toggle | C | player_controller |
 | toggle_invisibility | G | player_controller |
 | skill_debug_toggle | L | player_controller (toggles SkillDebugUI) |

@@ -2,11 +2,17 @@ extends Node3D
 
 var knockout_panel: Node3D
 var lethal_panel: Node3D
-var progress_bar: MeshInstance3D
 var indicator_visible: bool = false
 var _ko_label: Label3D
 var _knockout_mat: StandardMaterial3D
 var _lethal_mat: StandardMaterial3D
+var _ko_bg_mesh: MeshInstance3D
+var _lethal_bg_mesh: MeshInstance3D
+var _ko_fill_mesh: MeshInstance3D
+var _ko_fill_mat: StandardMaterial3D
+var _ko_default_color: Color
+var _lethal_default_color: Color
+var _flash_tween: Tween
 
 
 func _ready() -> void:
@@ -19,20 +25,21 @@ func _setup_panels() -> void:
 	_lethal_mat = StandardMaterial3D.new()
 	_lethal_mat.albedo_color = Color(0.9, 0.15, 0.1, 0.85)
 	_lethal_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_lethal_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	_lethal_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_lethal_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_lethal_default_color = _lethal_mat.albedo_color
 
 	lethal_panel = Node3D.new()
 	lethal_panel.name = "LethalPanel"
 	lethal_panel.position = Vector3(-0.8, 0, 0)
 	add_child(lethal_panel)
 
-	var lethal_bg := MeshInstance3D.new()
+	_lethal_bg_mesh = MeshInstance3D.new()
 	var lethal_quad := QuadMesh.new()
 	lethal_quad.size = Vector2(0.9, 0.9)
-	lethal_bg.mesh = lethal_quad
-	lethal_bg.material_override = _lethal_mat
-	lethal_panel.add_child(lethal_bg)
+	_lethal_bg_mesh.mesh = lethal_quad
+	_lethal_bg_mesh.material_override = _lethal_mat
+	lethal_panel.add_child(_lethal_bg_mesh)
 
 	var lethal_label := Label3D.new()
 	lethal_label.text = "Q"
@@ -46,20 +53,35 @@ func _setup_panels() -> void:
 	_knockout_mat = StandardMaterial3D.new()
 	_knockout_mat.albedo_color = Color(0.9, 0.8, 0.1, 0.85)
 	_knockout_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_knockout_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	_knockout_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_knockout_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_ko_default_color = _knockout_mat.albedo_color
 
 	knockout_panel = Node3D.new()
 	knockout_panel.name = "KnockoutPanel"
 	knockout_panel.position = Vector3(0.8, 0, 0)
 	add_child(knockout_panel)
 
-	var ko_bg := MeshInstance3D.new()
+	_ko_bg_mesh = MeshInstance3D.new()
 	var ko_quad := QuadMesh.new()
 	ko_quad.size = Vector2(0.9, 0.9)
-	ko_bg.mesh = ko_quad
-	ko_bg.material_override = _knockout_mat
-	knockout_panel.add_child(ko_bg)
+	_ko_bg_mesh.mesh = ko_quad
+	_ko_bg_mesh.material_override = _knockout_mat
+	knockout_panel.add_child(_ko_bg_mesh)
+
+	_ko_fill_mat = StandardMaterial3D.new()
+	_ko_fill_mat.albedo_color = Color(0.9, 0.8, 0.1, 0.85)
+	_ko_fill_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_ko_fill_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_ko_fill_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	_ko_fill_mesh = MeshInstance3D.new()
+	var fill_quad := QuadMesh.new()
+	fill_quad.size = Vector2(0.9, 0.9)
+	_ko_fill_mesh.mesh = fill_quad
+	_ko_fill_mesh.material_override = _ko_fill_mat
+	_ko_fill_mesh.visible = false
+	knockout_panel.add_child(_ko_fill_mesh)
 
 	_ko_label = Label3D.new()
 	_ko_label.text = "E"
@@ -69,19 +91,6 @@ func _setup_panels() -> void:
 	_ko_label.modulate = Color(1, 1, 1, 1)
 	_ko_label.position = Vector3(0, 0, 0.01)
 	knockout_panel.add_child(_ko_label)
-
-	var progress_mat := StandardMaterial3D.new()
-	progress_mat.albedo_color = Color(0.3, 0.9, 0.3, 0.9)
-	progress_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	progress_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-
-	progress_bar = MeshInstance3D.new()
-	var progress_quad := QuadMesh.new()
-	progress_quad.size = Vector2(0.0, 0.12)
-	progress_bar.mesh = progress_quad
-	progress_bar.material_override = progress_mat
-	progress_bar.position = Vector3(0, -0.55, 0.01)
-	knockout_panel.add_child(progress_bar)
 
 	visible = false
 
@@ -98,7 +107,7 @@ func _process(_delta: float) -> void:
 		var up := Vector3.UP
 		if abs(look_dir.dot(up)) > 0.99:
 			up = Vector3.FORWARD
-		var target_basis := Basis.looking_at(look_dir, up)
+		var target_basis := Basis.looking_at(-look_dir, up)
 		transform.basis = target_basis
 
 
@@ -106,17 +115,20 @@ func set_mode(mode: String) -> void:
 	match mode:
 		"takedown":
 			lethal_panel.visible = true
-			_knockout_mat.albedo_color = Color(0.9, 0.8, 0.1, 0.85)
+			_ko_default_color = Color(0.9, 0.8, 0.1, 0.85)
+			_knockout_mat.albedo_color = _ko_default_color
 			_ko_label.text = "E"
 			knockout_panel.position.x = 0.8
 		"drag":
 			lethal_panel.visible = false
-			_knockout_mat.albedo_color = Color(0.9, 0.8, 0.1, 0.85)
+			_ko_default_color = Color(0.9, 0.8, 0.1, 0.85)
+			_knockout_mat.albedo_color = _ko_default_color
 			_ko_label.text = "E"
 			knockout_panel.position.x = 0.0
 		"drop":
 			lethal_panel.visible = false
-			_knockout_mat.albedo_color = Color(0.2, 0.9, 0.3, 0.85)
+			_ko_default_color = Color(0.2, 0.9, 0.3, 0.85)
+			_knockout_mat.albedo_color = _ko_default_color
 			_ko_label.text = "DROP"
 			knockout_panel.position.x = 0.0
 
@@ -124,12 +136,39 @@ func set_mode(mode: String) -> void:
 func show_indicators(state: bool) -> void:
 	indicator_visible = state
 	visible = state
+	if _flash_tween:
+		_flash_tween.kill()
+		_flash_tween = null
 	if not state:
 		update_hold_progress(0.0)
 
 
 func update_hold_progress(pct: float) -> void:
 	pct = clampf(pct, 0.0, 1.0)
-	if progress_bar and progress_bar.mesh is QuadMesh:
-		var qm := progress_bar.mesh as QuadMesh
-		qm.size = Vector2(0.75 * pct, 0.12)
+	if pct > 0.0:
+		_ko_fill_mesh.visible = true
+		_ko_fill_mesh.scale.y = pct
+		_ko_fill_mesh.position.y = -0.45 * (1.0 - pct)
+		_knockout_mat.albedo_color = Color(0.0, 0.0, 0.0, 0.7)
+	else:
+		_ko_fill_mesh.visible = false
+		_knockout_mat.albedo_color = _ko_default_color
+
+
+func flash_indicators(panel: String) -> void:
+	if _flash_tween:
+		_flash_tween.kill()
+	_flash_tween = create_tween()
+	var mat: StandardMaterial3D
+	var default_color: Color
+	match panel:
+		"lethal":
+			mat = _lethal_mat
+			default_color = _lethal_default_color
+		"knockout":
+			mat = _knockout_mat
+			default_color = _ko_default_color
+		_:
+			return
+	_flash_tween.tween_property(mat, "albedo_color", Color.WHITE, 0.1)
+	_flash_tween.tween_property(mat, "albedo_color", default_color, 0.4)

@@ -20,6 +20,7 @@ var takedown_cooldown: float = 0.0
 var dragging: bool = false
 var _dragged_enemy: Node3D = null
 var _drag_hold_timer: float = 0.0
+var _hold_locked_target: Node3D = null
 
 @onready var camera: Camera3D = get_viewport().get_camera_3d()
 
@@ -37,6 +38,18 @@ func _physics_process(delta: float) -> void:
 		return
 
 	takedown_cooldown -= delta
+
+	if _hold_locked_target and hold_progress > 0.0:
+		if not is_instance_valid(_hold_locked_target):
+			_hold_locked_target = null
+			hold_progress = 0.0
+			_clear_indicators()
+			return
+		current_target = _hold_locked_target
+		current_target_type = TargetType.TAKEDOWN
+		_process_takedown_input(delta)
+		return
+
 	if takedown_cooldown > 0.0:
 		_clear_indicators()
 		return
@@ -57,9 +70,11 @@ func _physics_process(delta: float) -> void:
 
 
 func _process_takedown_input(delta: float) -> void:
-	if not _is_valid_takedown_target(current_target):
-		_clear_current_target()
-		return
+	if hold_progress <= 0.0:
+		if not _is_valid_takedown_target(current_target):
+			_clear_current_target()
+			return
+		_hold_locked_target = current_target
 
 	if Input.is_action_just_pressed("lethal_takedown"):
 		_perform_lethal_takedown(current_target)
@@ -73,6 +88,7 @@ func _process_takedown_input(delta: float) -> void:
 	else:
 		hold_progress = 0.0
 		current_target.update_hold_progress(0.0)
+		_hold_locked_target = null
 
 
 func _process_drag_input(delta: float) -> void:
@@ -225,10 +241,13 @@ func _clear_indicators() -> void:
 		_last_indicator_target.update_hold_progress(0.0)
 	_last_indicator_target = null
 	current_target = null
+	_hold_locked_target = null
+	hold_progress = 0.0
 
 
 func _clear_current_target() -> void:
 	current_target = null
+	_hold_locked_target = null
 	hold_progress = 0.0
 	if _last_indicator_target:
 		_last_indicator_target.update_hold_progress(0.0)
@@ -238,7 +257,10 @@ func _perform_lethal_takedown(target: Node3D) -> void:
 	if not _is_valid_takedown_target(target):
 		return
 	takedown_active = true
-	_clear_indicators()
+	_hold_locked_target = null
+
+	if is_instance_valid(target) and target.has_method("flash_indicators"):
+		target.flash_indicators("lethal")
 
 	var enemy_pos := target.global_position
 	var dir_to_player := (player.global_position - enemy_pos).normalized()
@@ -259,18 +281,20 @@ func _perform_lethal_takedown(target: Node3D) -> void:
 	if is_instance_valid(target) and target.has_method("kill"):
 		target.kill()
 
+	_clear_indicators()
+
 	if player.has_method("set_takedown_active"):
 		player.set_takedown_active(false)
 
 	takedown_active = false
 	takedown_cooldown = 0.3
 
-
 func _perform_knockout_takedown(target: Node3D) -> void:
-	if not _is_valid_takedown_target(target):
-		return
 	takedown_active = true
-	_clear_indicators()
+	_hold_locked_target = null
+
+	if is_instance_valid(target) and target.has_method("flash_indicators"):
+		target.flash_indicators("knockout")
 
 	var enemy_pos := target.global_position
 	var dir_to_player := (player.global_position - enemy_pos).normalized()
@@ -290,6 +314,8 @@ func _perform_knockout_takedown(target: Node3D) -> void:
 
 	if is_instance_valid(target) and target.has_method("knock_out"):
 		target.knock_out()
+
+	_clear_indicators()
 
 	if player.has_method("set_takedown_active"):
 		player.set_takedown_active(false)

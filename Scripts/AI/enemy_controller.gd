@@ -34,6 +34,10 @@ enum State { PATROL, SEARCH, PURSUIT, REVIVE, ALARM, GET_HELP, KNOCKED_OUT, DEAD
 @export var suspicious_speed: float = 3.5
 @export var angular_speed: float = 180.0
 
+@export_group("Search")
+@export var search_sweep_range: float = 60.0
+@export var search_sweep_speed: float = 25.0
+
 @export_group("Knocked Out")
 @export var revive_time: float = 4.0
 
@@ -65,6 +69,8 @@ var _current_revive_target: Node3D = null
 var _current_alarm_panel: Node3D = null
 var _get_help_target: Vector3
 var _investigate_timer: float = 0.0
+var _sweep_angle: float = 0.0
+var _sweep_dir: float = 1.0
 var _detection_bar_bg: MeshInstance3D
 var _detection_bar_fill: MeshInstance3D
 var _detection_bar_root: Node3D
@@ -540,6 +546,8 @@ func _enter_search() -> void:
 	state = State.SEARCH
 	_search_timer = 0.0
 	_has_last_known_pos = true
+	_sweep_angle = 0.0
+	_sweep_dir = 1.0
 	if player_in_sight and player:
 		_search_target = player.global_position
 	elif player:
@@ -550,7 +558,19 @@ func _enter_search() -> void:
 
 func _process_search(delta: float) -> void:
 	velocity = velocity.lerp(Vector3.ZERO, 4.0 * delta)
-	_rotate_look(_search_target, delta)
+
+	_sweep_angle += _sweep_dir * search_sweep_speed * delta
+	if abs(_sweep_angle) > search_sweep_range:
+		_sweep_dir *= -1
+		_sweep_angle = clampf(_sweep_angle, -search_sweep_range, search_sweep_range)
+
+	var dir := (_search_target - global_position).normalized()
+	dir.y = 0.0
+	if dir.length_squared() > 0.0:
+		var swept := dir.rotated(Vector3.UP, deg_to_rad(_sweep_angle))
+		var target_basis := Basis.looking_at(swept, Vector3.UP)
+		transform.basis = transform.basis.slerp(target_basis, turn_rate * delta)
+
 	_search_timer += delta
 
 
@@ -1124,3 +1144,9 @@ func update_hold_progress(pct: float) -> void:
 	var ind := find_child("TakedownIndicator", true, false)
 	if ind and ind.has_method("update_hold_progress"):
 		ind.update_hold_progress(pct)
+
+
+func flash_indicators(panel: String) -> void:
+	var ind := find_child("TakedownIndicator", true, false)
+	if ind and ind.has_method("flash_indicators"):
+		ind.flash_indicators(panel)
