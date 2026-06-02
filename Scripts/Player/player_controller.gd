@@ -214,6 +214,9 @@ func _handle_state_toggles() -> void:
 	if Input.is_action_just_pressed("skill_debug_toggle"):
 		_toggle_skill_debug()
 
+	if Input.is_action_just_pressed("mission_debug_toggle"):
+		_toggle_mission_debug()
+
 	if Input.is_action_just_pressed("sprint"):
 		if sprinting:
 			sprinting = false
@@ -367,6 +370,17 @@ func _toggle_skill_debug() -> void:
 	var SkillDebugUI := preload("res://Scripts/UI/SkillDebugUI.gd")
 	var ui := SkillDebugUI.new()
 	ui.name = "SkillDebugUI"
+	get_tree().current_scene.add_child(ui)
+
+
+func _toggle_mission_debug() -> void:
+	var existing := get_tree().current_scene.find_child("MissionDebugUI", false, false)
+	if existing:
+		existing.queue_free()
+		return
+	var MissionDebugUI := preload("res://Scripts/UI/MissionDebugUI.gd")
+	var ui := MissionDebugUI.new()
+	ui.name = "MissionDebugUI"
 	get_tree().current_scene.add_child(ui)
 
 

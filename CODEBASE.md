@@ -14,17 +14,28 @@ Token-preserving reference. Update when files change.
 │   │   ├── enemy_controller.gd        # 1152 lines: enemy AI state machine
 │   │   └── TakedownIndicator.gd       # 174 lines: billboard panels above enemy
 │   ├── Player/
-│   │   ├── player_controller.gd       # 380 lines: player movement, invisibility, sprint toggle, stamina, health, outline occlusion
-│   │   └── PlayerTakedownController.gd # 324 lines: takedown + drag interaction, player.dragging set/reset
+│   │   ├── player_controller.gd       # 394 lines: player movement, M-key mission debug toggle
+│   │   ├── PlayerTakedownController.gd # 324 lines: takedown + drag interaction
+│   │   └── PlayerData.gd              # 35 lines: autoload stub (money, story_flags)
 │   ├── Navigation/ground_nav.gd       # 44 lines: runtime navmesh baking
 │   ├── Camera/camera_follow.gd        # 21 lines: ortho camera follow
 │   ├── Skills/
 │   │   ├── SkillSaveData.gd           # 22 lines: serializable resource
 │   │   └── SkillManager.gd            # 143 lines: autoload skill system
+│   ├── Missions/
+│   │   ├── mission_data.gd            # 18 lines: MissionData Resource
+│   │   ├── objective_data.gd          # 8 lines: ObjectiveData Resource
+│   │   ├── mission_progress.gd        # 5 lines: MissionProgress save Resource
+│   │   ├── mission_manager.gd         # 143 lines: autoload mission system
+│   │   ├── mission_runtime.gd         # 141 lines: per-mission dynamic objectives
+│   │   └── mission_hud.gd             # 115 lines: right-side objective HUD
 │   └── UI/
 │       ├── PlayerHUD.gd               # 129 lines: HUD with stance icon, stamina bar, health bar
-│       ├── SkillDebugUI.gd            # 277 lines: L-key debug panel
+│       ├── SkillDebugUI.gd            # 277 lines: L-key debug panel (skills)
+│       ├── MissionDebugUI.gd          # 822 lines: M-key debug panel (missions + objectives)
 │       └── (editor theme files)
+├── Scenes/
+│   └── MissionHUD.tscn                # 9 lines: right-side objective panel scene
 ├── Prefabs/
 │   ├── Enemy/enemy.tscn               # Enemy scene (72 lines)
 │   └── Player/player.tscn             # Player scene (24 lines)
@@ -76,6 +87,33 @@ TestWorld (Node3D)
 
 ### SkillDebugUI (res://Scripts/UI/SkillDebugUI.gd)
 **Role**: Debug panel toggled with L key. Built programmatically (no .tscn). Close via X, L, or Escape.
+
+### PlayerData (res://Scripts/Player/PlayerData.gd)
+**Role**: Global singleton storing player currency and story flags.
+
+**Fields**: `money: int`, `story_flags: Dictionary`
+
+**Signals**: `money_changed`, `story_flag_set`
+
+**Methods**: `add_money()`, `spend_money()`, `set_story_flag()`, `get_story_flag()`, `has_story_flag()`.
+
+### MissionManager (res://Scripts/Missions/mission_manager.gd)
+**Role**: Global singleton managing mission data, selection, completion, scene transitions, and persistence.
+
+**Signals**: `mission_selected(id)`, `mission_completed(id, outcome)`, `mission_unlocked(id)`, `mission_availability_changed`
+
+**Key fields**: `missions: Dictionary`, `current_mission_id: String`
+
+**Methods**:
+- `register_mission(data)` — registers a MissionData, restores progress from save
+- `get_available_missions()` — returns Array[MissionData] of incomplete, available missions
+- `select_mission(id)` / `get_mission(id)`
+- `complete_mission(id, outcome)` — marks complete, applies rewards (money→PlayerData, xp/stim→SkillManager, story_flags→PlayerData), handles mutual exclusion
+- `unlock_mission(id)` — persists to save
+- `start_mission(id)` — selects + calls `change_scene_to_file(scene_path)`
+- `is_mission_unlocked/completed(id)`
+
+**Persistence**: `user://mission_progress.tres` (MissionProgress Resource with `completed_mission_ids` + `unlocked_mission_ids` arrays).
 
 ## Key Scripts
 
@@ -196,6 +234,51 @@ Camera-facing via `_process()` with Basis.looking_at().
 
 **Wiring**: Finds player via `"player"` group, connects to `movement_state_changed`, `stamina_changed`, `stamina_depleted`, `health_changed` signals.
 
+### MissionData (res://Scripts/Missions/mission_data.gd)
+`class_name MissionData extends Resource`. Core mission definition.
+
+**Fields**: `id`, `title`, `description`, `scene_path`, `is_campaign`, `is_available`, `is_completed`, `mutually_exclusive_with_id`, `prerequisites: Array[String]`, `rewards: Dictionary` (money, xp, neural_stimulators, story_flags).
+
+### ObjectiveData (res://Scripts/Missions/objective_data.gd)
+`class_name ObjectiveData extends Resource`. Single mission objective. Fields: `id`, `description`, `is_primary`, `is_complete`, `is_visible`.
+
+### MissionProgress (res://Scripts/Missions/mission_progress.gd)
+`class_name MissionProgress extends Resource`. Save file. Fields: `completed_mission_ids: Array[String]`, `unlocked_mission_ids: Array[String]`.
+
+### MissionRuntime (res://Scripts/Missions/mission_runtime.gd)
+**Role**: Node placed in each mission scene. Handles dynamic objectives during gameplay.
+
+**Fields**: `primary_objective: ObjectiveData`, `optional_objectives: Array[ObjectiveData]`, `completed_objectives: Array[ObjectiveData]`
+
+**Methods**:
+- `add_objective(obj)` — appends to optional (rejects duplicates)
+- `complete_objective(id)` — moves from primary or optional to completed, emits `objective_completed`
+- `replace_primary_objective(new)` — old primary → optional, sets new primary
+- `fail_primary_objective(alternate)` — old primary → completed, sets alternate
+- `end_mission(outcome, rewards_override)` — applies override, calls MissionManager.complete_mission, emits `mission_ended`
+- `queue_update_hud()` — calls HUD.refresh_objectives with current state
+- `get_mission_id()` / `get_mission_data()` — reads from MissionManager
+
+**Auto-HUD**: On `_ready()`, finds or creates a `CanvasLayer` + `MissionHUD.tscn` instance as a child of the current scene root.
+
+**Signals**: `objective_completed(id)`, `primary_objective_changed(new)`, `mission_ended(outcome)`
+
+### MissionHUD (res://Scripts/Missions/mission_hud.gd)
+**Role**: Right-side objectives panel (Control). Built programmatically in `_ready()`.
+
+**Layout**: Panel → MarginContainer → VBoxContainer — "MISSION OBJECTIVES" header, primary (gold `[...]`), optional (`· ...`), completed (`✓ ...`, green).
+
+**Integration**: `refresh_objectives(objectives, completed_ids, primary)` called by MissionRuntime. Also finds MissionRuntime via `find_child` and calls `set_hud_reference(self)` for two-way binding.
+
+### MissionDebugUI (res://Scripts/UI/MissionDebugUI.gd)
+**Role**: Debug panel toggled with M key. Two-tab interface for editing mission runtime + database.
+
+**Tab 1 — "Current Mission"**: Displays current mission info. If MissionRuntime exists in scene, provides controls for: primary objective display + [Replace]/[Fail→Alt], optional objectives list with [Complete] per item, completed list, Add Objective form (id/desc), Complete Objective dropdown, End Mission section (outcome + reward overrides). Start Mission dropdown at top.
+
+**Tab 2 — "Missions"**: Scrollable list of all registered missions with status icons. Per mission: [Edit] (expands inline editor for title, description, scene_path, mutually_exclusive, checkboxes, rewards, prerequisites), [Unlock], [Start]. [Register New Mission] button. Player data summary (money, XP, stim, completed/unlocked lists).
+
+**Build**: Programmatic (no .tscn), follows SkillDebugUI pattern. Closes via M or Escape.
+
 ### ground_nav.gd
 **Role**: Runtime navmesh baking from all StaticBody3D colliders. `agent_max_climb = 0.5`, `agent_radius = 0.5`, `agent_height = 2.0`.
 
@@ -211,6 +294,7 @@ Camera-facing via `_process()` with Basis.looking_at().
 | crouch_toggle | C | player_controller |
 | toggle_invisibility | G | player_controller |
 | skill_debug_toggle | L | player_controller (toggles SkillDebugUI) |
+| mission_debug_toggle | M | player_controller (toggles MissionDebugUI) |
 | knockout | E | PlayerTakedownController |
 | lethal_takedown | Q | PlayerTakedownController |
 
@@ -222,3 +306,6 @@ Camera-facing via `_process()` with Basis.looking_at().
 5. `nav_agent.get_next_path_position()` returns `Vector3.ZERO` if no valid path — guarded in `_move_toward_target()`.
 6. `SkillSaveData.tres` saved to `user://` — check `~/.local/share/godot/app_userdata/3d Stealth/`.
 7. `SkillManager` uses `preload()` for save data class (not `class_name` directly) to avoid autoload resolution ordering issues.
+8. `MissionRuntime` finds HUD via `get_node("/root/MissionHUD")` first (for scenes with pre-placed HUD), otherwise creates a `CanvasLayer` + `MissionHUD.tscn` instance. The HUD is scoped to the current scene.
+9. `MissionManager.complete_mission()` guards against double-completion (early return if `mission_id` already in `completed_mission_ids`).
+10. Mission data (MissionData Resource) is **not serialized** itself — only the progress (completed/unlocked IDs) is persisted. The actual mission definitions come from `register_mission()` calls at game start.
