@@ -4,6 +4,13 @@
 [ext_resource type="Script" uid="uid://cey21v8ko8ngh" path="res://Scripts/Camera/camera_follow.gd" id="2"]
 [ext_resource type="PackedScene" uid="uid://pt47p3ad5t3n" path="res://Prefabs/Enemy/enemy.tscn" id="3"]
 [ext_resource type="Script" uid="uid://bvtjlag7emahc" path="res://Scripts/Navigation/ground_nav.gd" id="4"]
+[ext_resource type="PackedScene" uid="uid://dg6b800grkjhn" path="res://Prefabs/Prop/Door.tscn" id="5"]
+[ext_resource type="PackedScene" uid="uid://b3jhn4wt7mkxt" path="res://Prefabs/Prop/Crate.tscn" id="6"]
+[ext_resource type="PackedScene" uid="uid://dbfsvty70jh21" path="res://Prefabs/Prop/Stairs.tscn" id="7_ud3vi"]
+[ext_resource type="PackedScene" uid="uid://bp3jrtm05d2v6" path="res://Prefabs/Prop/Table.tscn" id="8_5457m"]
+[ext_resource type="PackedScene" uid="uid://dh5sb8siwoejv" path="res://Prefabs/Prop/Vent.tscn" id="9_ivea3"]
+[ext_resource type="PackedScene" uid="uid://6t0ggkco5u7v" path="res://Prefabs/Prop/Catwalk.tscn" id="10_jvck6"]
+[ext_resource type="PackedScene" uid="uid://bsylwexr4qkth" path="res://Prefabs/Prop/Ladder.tscn" id="11_mh80q"]
 
 [sub_resource type="StandardMaterial3D" id="Mat_ground"]
 albedo_color = Color(0.25, 0.25, 0.27, 1)
@@ -51,14 +58,6 @@ size = Vector3(2, 0.5, 4)
 
 [sub_resource type="BoxShape3D" id="BoxShape_ramp"]
 size = Vector3(2, 1.4261475, 4)
-
-[sub_resource type="StandardMaterial3D" id="Mat_crate"]
-albedo_color = Color(0.75, 0.45, 0.12, 1)
-
-[sub_resource type="BoxMesh" id="BoxMesh_crate"]
-material = SubResource("Mat_crate")
-
-[sub_resource type="BoxShape3D" id="BoxShape_crate"]
 
 [sub_resource type="NavigationMesh" id="NavigationMesh_dsnr4"]
 
@@ -136,14 +135,8 @@ mesh = SubResource("BoxMesh_ramp")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.7683716e-07, -0.4631958, 0)
 shape = SubResource("BoxShape_ramp")
 
-[node name="Crate" type="StaticBody3D" parent="." unique_id=764656682]
+[node name="Crate" parent="." unique_id=764656682 instance=ExtResource("6")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.5, -3)
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Crate" unique_id=1596661328]
-mesh = SubResource("BoxMesh_crate")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Crate" unique_id=1646933784]
-shape = SubResource("BoxShape_crate")
 
 [node name="NavigationRegion3D" type="NavigationRegion3D" parent="." unique_id=907260319]
 navigation_mesh = SubResource("NavigationMesh_dsnr4")
@@ -152,13 +145,14 @@ debug_show_navmesh = false
 debug_navmesh_color = Color(0, 1, 0, 0.06666667)
 
 [node name="Enemy" parent="." unique_id=1100535285 instance=ExtResource("3")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.9, 2)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.9, 8.225341)
 vision_range = 7.0
 sight_detection_rate = 16.0
 movement_multiplier = 3.0
 search_sweep_range = 30.0
 search_sweep_speed = 5.0
-debug = true
+show_vision_cone = false
+show_waypoints = false
 
 [node name="VisionRay" parent="Enemy" index="5"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
@@ -181,7 +175,28 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.7522745, 0, 6.409256)
 [node name="Point6" type="Marker3D" parent="Enemy/PatrolPoints" index="5" unique_id=1004739766]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.386725, 0, 6.409256)
 
+[node name="Door" parent="." unique_id=1220405574 instance=ExtResource("5")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0, -3.2856455)
+
+[node name="Ladder" parent="." unique_id=1656724066 instance=ExtResource("11_mh80q")]
+transform = Transform3D(1, 0, 0, 0, 0.4928941, 0, 0, 0, 1, 3.42, 2.1909757, 2.51)
+
 [node name="Player" parent="." unique_id=1888511002 instance=ExtResource("1")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+
+[node name="Stairs" parent="." unique_id=916201263 instance=ExtResource("7_ud3vi")]
+transform = Transform3D(-1.47808, 0, -1.2921787e-07, 0, 1.47808, 0, 1.2921787e-07, 0, -1.47808, 5.376243, 0, -0.0580256)
+
+[node name="Crate2" parent="." unique_id=930874478 instance=ExtResource("6")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.3233356, 2.25, 4.7493052)
+
+[node name="Table" parent="." unique_id=1917969696 instance=ExtResource("8_5457m")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.7817397, 0, -6.514327)
+
+[node name="Vent" parent="." unique_id=1194790116 instance=ExtResource("9_ivea3")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.041745, 1.4848479, -7.6)
+
+[node name="Catwalk" parent="." unique_id=201533149 instance=ExtResource("10_jvck6")]
+transform = Transform3D(-4.371139e-08, 0, -1, 0, 1, 0, 1, 0, -4.371139e-08, 3.2838778, 2.7930956, 0.6739249)
 
 [editable path="Enemy"]

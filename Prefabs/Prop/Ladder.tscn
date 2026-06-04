@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://bsylwexr4qkth"]
+
+[ext_resource type="Script" path="res://Scripts/Props/Ladder.gd" id="1"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_editor"]
+albedo_color = Color(0.6, 0.4, 0.15, 0.5)
+
+[sub_resource type="BoxMesh" id="Mesh_box"]
+size = Vector3(1, 3, 0.15)
+material = SubResource("Mat_editor")
+
+[sub_resource type="BoxShape3D" id="Shape_box"]
+size = Vector3(1, 3, 0.15)
+
+[node name="Ladder" type="StaticBody3D"]
+script = ExtResource("1")
+
+[node name="EditorMesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("Mesh_box")
+
+[node name="EditorCollision" type="CollisionShape3D" parent="."]
+shape = SubResource("Shape_box")

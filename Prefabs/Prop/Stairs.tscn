@@ -1,0 +1,45 @@
+[gd_scene format=3 uid="uid://dbfsvty70jh21"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_step"]
+albedo_color = Color(0.55, 0.5, 0.45, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_step0"]
+material = SubResource("Mat_step")
+size = Vector3(1.0, 0.25, 0.3)
+
+[sub_resource type="BoxMesh" id="BoxMesh_step1"]
+material = SubResource("Mat_step")
+size = Vector3(1.0, 0.25, 0.3)
+
+[sub_resource type="BoxMesh" id="BoxMesh_step2"]
+material = SubResource("Mat_step")
+size = Vector3(1.0, 0.25, 0.3)
+
+[sub_resource type="BoxMesh" id="BoxMesh_step3"]
+material = SubResource("Mat_step")
+size = Vector3(1.0, 0.25, 0.3)
+
+[sub_resource type="ConvexPolygonShape3D" id="Shape_ramp"]
+points = PackedVector3Array(-0.5, 0, 0.15, 0.5, 0, 0.15, -0.5, 0, -1.05, 0.5, 0, -1.05, -0.5, 1, -1.05, 0.5, 1, -1.05)
+
+[node name="Stairs" type="StaticBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+
+[node name="Step0" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.125, 0)
+mesh = SubResource("BoxMesh_step0")
+
+[node name="Step1" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.375, -0.3)
+mesh = SubResource("BoxMesh_step1")
+
+[node name="Step2" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.625, -0.6)
+mesh = SubResource("BoxMesh_step2")
+
+[node name="Step3" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.875, -0.9)
+mesh = SubResource("BoxMesh_step3")
+
+[node name="RampCollision" type="CollisionShape3D" parent="."]
+shape = SubResource("Shape_ramp")

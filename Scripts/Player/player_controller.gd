@@ -47,6 +47,9 @@ var current_stealth: float = 100.0
 @export_group("Jump")
 @export var jump_velocity: float = 4.5
 
+@export_group("Ladder")
+@export var climb_speed: float = 4.0
+
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 var crouching: bool = false
 var sprinting: bool = false
@@ -56,9 +59,16 @@ var invisible_to_ai: bool = false
 
 var takedown_active: bool = false
 var dragging: bool = false
+var on_ladder: bool = false
+var _ladder_nearby: bool = false
+var _current_ladder: Node3D = null
+var _ladder_height: float = 3.0
+var _ladder_grace_timer: float = 0.0
+var _player_half_height: float = 0.9
 var collision_shape: CollisionShape3D
 var _outline_mesh: MeshInstance3D
 var _occlusion_timer: float = 0.0
+var _ladder_detector: Area3D
 
 var stamina: float = 100.0
 var health: float = 100.0
@@ -78,6 +88,9 @@ signal health_changed(current: float, max_val: float)
 
 func _ready() -> void:
 	add_to_group("player")
+	floor_snap_length = 0.5
+	floor_max_angle = deg_to_rad(60)
+	max_slides = 16
 	collision_shape = $CollisionShape3D
 	if collision_shape and collision_shape.shape is CapsuleShape3D:
 		normal_collision_height = collision_shape.shape.height
@@ -90,6 +103,7 @@ func _ready() -> void:
 	health_changed.emit(health, max_health)
 
 	_setup_takedown_controller()
+	_setup_ladder_detector()
 	_setup_outline()
 	_setup_hud()
 
@@ -99,6 +113,51 @@ func _setup_takedown_controller() -> void:
 	var ctrl := TakedownCtrl.new()
 	ctrl.name = "PlayerTakedownController"
 	add_child(ctrl)
+
+
+func _setup_ladder_detector() -> void:
+	_ladder_detector = Area3D.new()
+	_ladder_detector.name = "LadderDetector"
+	var shape_node := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(0.8, 1.8, 0.6)
+	shape_node.shape = box
+	shape_node.position = Vector3(0, 0.9, 0.3)
+	_ladder_detector.add_child(shape_node)
+	_ladder_detector.collision_layer = 0
+	_ladder_detector.collision_mask = 2
+	add_child(_ladder_detector)
+	_ladder_detector.body_entered.connect(_on_ladder_body_entered)
+	_ladder_detector.body_exited.connect(_on_ladder_body_exited)
+
+
+func _on_ladder_body_entered(body: Node3D) -> void:
+	if body.is_in_group("ladder"):
+		_ladder_nearby = true
+		_current_ladder = body
+
+
+func _on_ladder_body_exited(body: Node3D) -> void:
+	if body.is_in_group("ladder"):
+		_ladder_nearby = false
+		_current_ladder = null
+
+
+func _attach_to_ladder(ladder_node: Node3D) -> void:
+	on_ladder = true
+	_current_ladder = ladder_node
+	_ladder_grace_timer = 0.4
+	if ladder_node.has_method("get_ladder_height"):
+		_ladder_height = ladder_node.get_ladder_height()
+	velocity = Vector3.ZERO
+	global_position.y += 0.15
+
+
+func _detach_from_ladder() -> void:
+	on_ladder = false
+	_current_ladder = null
+	_ladder_height = 3.0
+	_ladder_grace_timer = 0.0
 
 
 func _setup_hud() -> void:
@@ -171,6 +230,12 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		return
 
+	if on_ladder:
+		_handle_ladder_movement(delta)
+		move_and_slide()
+		_rotate_to_movement(_get_input_direction(), delta)
+		return
+
 	_handle_state_toggles()
 	_handle_gravity(delta)
 	_handle_jump()
@@ -179,6 +244,7 @@ func _physics_process(delta: float) -> void:
 	var speed := _get_speed()
 	_apply_movement(move_dir, speed, delta)
 
+	_step_up(delta)
 	move_and_slide()
 	_rotate_to_movement(move_dir, delta)
 
@@ -243,6 +309,93 @@ func _get_speed() -> float:
 	if sprinting:
 		return sprint_speed
 	return walk_speed
+
+
+func _handle_ladder_movement(delta: float) -> void:
+	if not _current_ladder:
+		_detach_from_ladder()
+		return
+
+	_ladder_grace_timer = maxf(_ladder_grace_timer - delta, 0.0)
+
+	var base_y := _current_ladder.global_position.y
+	var top_y := base_y + _ladder_height - 0.3
+	if global_position.y >= top_y:
+		_current_ladder.on_e_interact(self)
+		return
+	if _ladder_grace_timer <= 0.0 and is_on_floor() and velocity.y <= 0.0:
+		var player_bottom_y := global_position.y - _player_half_height
+		var dist_from_base := player_bottom_y - base_y
+		if dist_from_base > 0.5:
+			_current_ladder.on_e_interact(self)
+			return
+		elif velocity.y < -0.01:
+			_current_ladder.on_e_interact(self)
+			return
+
+	var move_dir := _get_input_direction()
+	var target_y := 0.0
+	if move_dir.y < -0.5:
+		target_y = climb_speed
+	elif move_dir.y > 0.5:
+		target_y = -climb_speed
+	velocity.y = move_toward(velocity.y, target_y, acceleration * delta)
+	velocity.x = move_toward(velocity.x, 0.0, acceleration * delta)
+	velocity.z = move_toward(velocity.z, 0.0, acceleration * delta)
+
+	var ladder_pos := _current_ladder.global_position
+	global_position.x = ladder_pos.x
+	global_position.z = ladder_pos.z
+
+
+func _step_up(delta: float) -> void:
+	if not is_on_floor():
+		return
+	var move_dir := _get_input_direction()
+	if move_dir.length_squared() == 0.0:
+		return
+
+	var max_step := 1.0
+	var probe_dist := 1.2
+	var fwd := -camera.global_transform.basis.z
+	var rgt := camera.global_transform.basis.x
+	var dir := (rgt * move_dir.x + fwd * -move_dir.y).normalized()
+
+	var space := get_world_3d().direct_space_state
+	var feet_y := global_position.y - _player_half_height
+
+	var from1 := Vector3(global_position.x, feet_y + 0.05, global_position.z)
+	var to1 := from1 + dir * probe_dist
+	var q1 := PhysicsRayQueryParameters3D.create(from1, to1)
+	q1.exclude = [self]
+	var hit1 := space.intersect_ray(q1)
+	if not hit1:
+		return
+
+	var from2 := Vector3(global_position.x, feet_y + max_step + 0.1, global_position.z)
+	var to2 := from2 + dir * probe_dist
+	var q2 := PhysicsRayQueryParameters3D.create(from2, to2)
+	q2.exclude = [self]
+	var hit2 := space.intersect_ray(q2)
+	if hit2:
+		return
+
+	var land_pos: Vector3 = hit1.position + dir * 0.4
+	var from3 := Vector3(land_pos.x, hit1.position.y + max_step, land_pos.z)
+	var to3 := Vector3(land_pos.x, feet_y - 0.1, land_pos.z)
+	var q3 := PhysicsRayQueryParameters3D.create(from3, to3)
+	q3.exclude = [self]
+	var hit3 := space.intersect_ray(q3)
+	if not hit3:
+		return
+
+	var surface_normal: Vector3 = hit3.normal
+	if surface_normal.angle_to(Vector3.UP) > floor_max_angle:
+		return
+
+	var land_y: float = hit3.position.y + 0.05
+	global_position.y = land_y + _player_half_height
+	velocity.y = 0.0
 
 
 func _apply_movement(move_dir: Vector2, speed: float, delta: float) -> void:

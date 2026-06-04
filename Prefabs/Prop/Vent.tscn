@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://dh5sb8siwoejv"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_vent"]
+albedo_color = Color(0.4, 0.4, 0.42, 1)
+metallic = 0.6
+roughness = 0.4
+
+[sub_resource type="BoxMesh" id="BoxMesh_vent"]
+material = SubResource("Mat_vent")
+size = Vector3(2.0, 0.3, 0.3)
+
+[sub_resource type="BoxShape3D" id="BoxShape_vent"]
+size = Vector3(2.0, 0.3, 0.3)
+
+[node name="Vent" type="StaticBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.15, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_vent")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape_vent")

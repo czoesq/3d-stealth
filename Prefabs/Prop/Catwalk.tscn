@@ -1,0 +1,48 @@
+[gd_scene format=3 uid="uid://6t0ggkco5u7v"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_platform"]
+albedo_color = Color(0.35, 0.35, 0.38, 1)
+
+[sub_resource type="StandardMaterial3D" id="Mat_rail"]
+albedo_color = Color(0.3, 0.3, 0.32, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_platform"]
+material = SubResource("Mat_platform")
+size = Vector3(3.6, 0.144, 1.2)
+
+[sub_resource type="BoxShape3D" id="BoxShape_platform"]
+size = Vector3(3.6, 0.144, 1.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_rail"]
+material = SubResource("Mat_rail")
+size = Vector3(3.6, 1.2, 0.06)
+
+[sub_resource type="BoxShape3D" id="BoxShape_rail"]
+size = Vector3(3.6, 1.2, 0.06)
+
+[node name="Catwalk" type="StaticBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+
+[node name="Platform" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.072, 0)
+mesh = SubResource("BoxMesh_platform")
+
+[node name="PlatformShape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.072, 0)
+shape = SubResource("BoxShape_platform")
+
+[node name="RailL" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.672, -0.63)
+mesh = SubResource("BoxMesh_rail")
+
+[node name="RailLShape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.672, -0.63)
+shape = SubResource("BoxShape_rail")
+
+[node name="RailR" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.672, 0.63)
+mesh = SubResource("BoxMesh_rail")
+
+[node name="RailRShape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.672, 0.63)
+shape = SubResource("BoxShape_rail")

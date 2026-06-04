@@ -7,7 +7,7 @@ extends Node3D
 @export var drag_hold_time: float = 0.5
 @export var drag_follow_distance: float = 2.0
 
-enum TargetType { NONE, TAKEDOWN, DRAG }
+enum TargetType { NONE, TAKEDOWN, DRAG, INTERACTABLE }
 
 var player: CharacterBody3D
 var current_target: Node3D = null
@@ -21,6 +21,10 @@ var dragging: bool = false
 var _dragged_enemy: Node3D = null
 var _drag_hold_timer: float = 0.0
 var _hold_locked_target: Node3D = null
+
+var _interactable_target: Node3D = null
+var _interactable_hold_progress: float = 0.0
+var _interactable_hold_active: bool = false
 
 @onready var camera: Camera3D = get_viewport().get_camera_3d()
 
@@ -54,8 +58,29 @@ func _physics_process(delta: float) -> void:
 		_clear_indicators()
 		return
 
-	current_target = _find_nearest_interactable_enemy()
-	current_target_type = _get_target_type(current_target)
+	var enemy_target := _find_nearest_interactable_enemy()
+	var enemy_type := _get_target_type(enemy_target)
+
+	var inter_target: Node3D = null
+	if not enemy_target:
+		inter_target = _find_nearest_interactable()
+
+	if enemy_target:
+		current_target = enemy_target
+		current_target_type = enemy_type
+		_interactable_target = null
+		_interactable_hold_progress = 0.0
+		_interactable_hold_active = false
+	elif inter_target:
+		_clear_enemy_target()
+		current_target = inter_target
+		current_target_type = TargetType.INTERACTABLE
+	else:
+		current_target = null
+		current_target_type = TargetType.NONE
+		_clear_enemy_target()
+		_interactable_target = null
+
 	_update_indicator_target()
 
 	if not current_target:
@@ -67,6 +92,8 @@ func _physics_process(delta: float) -> void:
 		_process_takedown_input(delta)
 	elif current_target_type == TargetType.DRAG:
 		_process_drag_input(delta)
+	elif current_target_type == TargetType.INTERACTABLE:
+		_process_interactable_input(delta)
 
 
 func _process_takedown_input(delta: float) -> void:
@@ -143,6 +170,8 @@ func _drop_enemy() -> void:
 	if "dragging" in player:
 		player.dragging = false
 	dragging = false
+	if is_instance_valid(_dragged_enemy):
+		_dragged_enemy.velocity = Vector3.ZERO
 	_dragged_enemy = null
 
 
@@ -222,8 +251,11 @@ func _is_valid_takedown_target(target: Node3D) -> bool:
 func _update_indicator_target() -> void:
 	if _last_indicator_target and _last_indicator_target != current_target:
 		if is_instance_valid(_last_indicator_target):
-			_last_indicator_target.show_takedown_indicators(false)
-			_last_indicator_target.update_hold_progress(0.0)
+			if _last_indicator_target.has_method("show_takedown_indicators"):
+				_last_indicator_target.show_takedown_indicators(false)
+				_last_indicator_target.update_hold_progress(0.0)
+			if _last_indicator_target.has_method("show_prompt"):
+				_last_indicator_target.show_prompt(false)
 
 	if current_target and current_target != _last_indicator_target:
 		if current_target.has_method("show_takedown_indicators"):
@@ -231,26 +263,125 @@ func _update_indicator_target() -> void:
 			if current_target.has_method("set_indicator_mode"):
 				var mode := "takedown" if current_target_type == TargetType.TAKEDOWN else "drag"
 				current_target.set_indicator_mode(mode)
+		if current_target.has_method("show_prompt"):
+			current_target.show_prompt(true)
 
 	_last_indicator_target = current_target
 
 
 func _clear_indicators() -> void:
 	if _last_indicator_target and is_instance_valid(_last_indicator_target):
-		_last_indicator_target.show_takedown_indicators(false)
-		_last_indicator_target.update_hold_progress(0.0)
+		if _last_indicator_target.has_method("show_takedown_indicators"):
+			_last_indicator_target.show_takedown_indicators(false)
+			_last_indicator_target.update_hold_progress(0.0)
+		if _last_indicator_target.has_method("show_prompt"):
+			_last_indicator_target.show_prompt(false)
 	_last_indicator_target = null
 	current_target = null
 	_hold_locked_target = null
 	hold_progress = 0.0
+	_interactable_hold_progress = 0.0
+	_interactable_hold_active = false
 
 
 func _clear_current_target() -> void:
 	current_target = null
 	_hold_locked_target = null
 	hold_progress = 0.0
+	_interactable_hold_progress = 0.0
+	_interactable_hold_active = false
 	if _last_indicator_target:
-		_last_indicator_target.update_hold_progress(0.0)
+		if _last_indicator_target.has_method("update_hold_progress"):
+			_last_indicator_target.update_hold_progress(0.0)
+
+
+func _clear_enemy_target() -> void:
+	current_target = null
+	_hold_locked_target = null
+	hold_progress = 0.0
+	_drag_hold_timer = 0.0
+
+
+func _find_nearest_interactable() -> Node3D:
+	var nodes := get_tree().get_nodes_in_group("interactable")
+	var nearest: Node3D = null
+	var nearest_dist_sq := INF
+	var player_pos := player.global_position
+	var player_fwd := -player.global_transform.basis.z
+
+	for node in nodes:
+		var obj := node as Node3D
+		if not obj or not is_instance_valid(obj):
+			continue
+		if obj.has_method("get_q_label") and obj.has_method("on_e_interact"):
+			pass
+		else:
+			continue
+
+		var range_val: float = obj.interaction_range if "interaction_range" in obj else 2.5
+		var range_sq: float = range_val * range_val
+
+		var to_obj := obj.global_position - player_pos
+		var dist_sq := to_obj.length_squared()
+
+		if dist_sq > range_sq:
+			continue
+
+		if dist_sq < nearest_dist_sq:
+			var to_obj_n := to_obj.normalized()
+			var angle := rad_to_deg(acos(clampf(player_fwd.dot(to_obj_n), -1.0, 1.0)))
+			if angle > facing_angle:
+				continue
+			nearest = obj
+			nearest_dist_sq = dist_sq
+
+	return nearest
+
+
+func _process_interactable_input(delta: float) -> void:
+	if not is_instance_valid(current_target):
+		_clear_current_target()
+		return
+
+	var target := current_target
+	if not target.has_method("on_e_interact"):
+		_clear_current_target()
+		return
+
+	if Input.is_action_just_pressed("knockout"):
+		target.on_e_interact(player)
+		return
+
+	if Input.is_action_just_pressed("lethal_takedown"):
+		_interactable_hold_active = true
+		_interactable_hold_progress = 0.0
+		if target.has_method("on_q_start"):
+			target.on_q_start(player)
+
+	if _interactable_hold_active:
+		if Input.is_action_pressed("lethal_takedown"):
+			var hold_time := 1.0
+			if target.has_method("get_q_hold_time"):
+				hold_time = target.get_q_hold_time()
+			_interactable_hold_progress += delta / hold_time
+			if target.has_method("update_hold_progress"):
+				target.update_hold_progress(_interactable_hold_progress)
+			if target.has_method("on_q_hold"):
+				target.on_q_hold(delta, player)
+			if _interactable_hold_progress >= 1.0:
+				if target.has_method("update_hold_progress"):
+					target.update_hold_progress(0.0)
+				if target.has_method("on_q_complete"):
+					target.on_q_complete(player)
+				_interactable_hold_active = false
+				_interactable_hold_progress = 0.0
+		else:
+			if _interactable_hold_active and target.has_method("update_hold_progress"):
+				target.update_hold_progress(0.0)
+			if _interactable_hold_active and target.has_method("on_q_cancel"):
+				target.on_q_cancel()
+			_interactable_hold_active = false
+			_interactable_hold_progress = 0.0
 
 
 func _perform_lethal_takedown(target: Node3D) -> void:

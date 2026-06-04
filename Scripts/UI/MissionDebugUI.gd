@@ -3,14 +3,18 @@ extends Control
 
 const PANEL_PADDING: float = 16.0
 const ROW_HEIGHT: float = 30.0
+const MissionDataClass = preload("res://Scripts/Missions/mission_data.gd")
+const ObjectiveDataClass = preload("res://Scripts/Missions/objective_data.gd")
 
 var _tab_container: TabContainer
 var _mission_list_vbox: VBoxContainer
+var _mission_rows_vbox: VBoxContainer
 var _runtime_section: VBoxContainer
 var _no_runtime_label: Label
 var _no_mission_label: Label
 
 var _edit_forms: Dictionary = {}
+var _editing_text: bool = false
 
 var _obj_id_edit: LineEdit
 var _obj_desc_edit: LineEdit
@@ -39,9 +43,18 @@ var _start_mission_btn: Button
 var _mission_info_label: Label
 
 var _runtime: Node = null
+var _pd_money_label: Label
+var _pd_xp_label: Label
+var _pd_stim_label: Label
+var _pd_missions_label: Label
+var _was_paused: bool = false
 
 
 func _ready() -> void:
+	process_mode = PROCESS_MODE_WHEN_PAUSED
+	_was_paused = get_tree().paused
+	if not _was_paused:
+		get_tree().paused = true
 	_build_ui()
 
 
@@ -49,6 +62,12 @@ func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("mission_debug_toggle") or \
 	   (event is InputEventKey and event.keycode == KEY_ESCAPE and event.pressed and not event.echo):
 		_close()
+		get_viewport().set_input_as_handled()
+		return
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and _editing_text:
 		get_viewport().set_input_as_handled()
 
 
@@ -70,8 +89,9 @@ func _build_ui() -> void:
 	var vb := VBoxContainer.new()
 	vb.name = "VBox"
 	vb.add_theme_constant_override("separation", 4)
+	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vb.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	outer.add_child(vb)
-	vb.position = Vector2(PANEL_PADDING, PANEL_PADDING)
 
 	_title_bar(vb)
 	vb.add_theme_constant_override("separation", 6)
@@ -91,12 +111,13 @@ func _build_ui() -> void:
 func _center_panel() -> void:
 	var outer := get_node("Outer") as Control
 	var vb := outer.get_node("VBox") as Control
-	var content := vb.get_minimum_size()
-	var w := maxf(content.x, 520.0)
-	var h := minf(content.y + PANEL_PADDING * 2, get_viewport().size.y * 0.85)
+	var screen := Vector2(get_viewport().size)
+	var w := maxf(screen.x * 0.7, 720.0)
+	var h := screen.y * 0.85
 	outer.size = Vector2(w, h)
-	var screen = get_viewport().size
 	outer.position = (screen - outer.size) / 2
+	vb.position = Vector2(PANEL_PADDING, PANEL_PADDING)
+	vb.size = outer.size - Vector2(PANEL_PADDING * 2, PANEL_PADDING * 2)
 
 
 func _title_bar(parent: Container) -> void:
@@ -130,10 +151,10 @@ func _make_small_btn(text: String, w: float = 100.0) -> Button:
 	return btn
 
 
-func _make_label(text: String, color: Color = Color(1, 1, 1), size: int = 12) -> Label:
+func _make_label(text: String, color: Color = Color(1, 1, 1), font_size: int = 12) -> Label:
 	var lbl := Label.new()
 	lbl.text = text
-	lbl.add_theme_font_size_override("font_size", size)
+	lbl.add_theme_font_size_override("font_size", font_size)
 	lbl.add_theme_color_override("font_color", color)
 	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return lbl
@@ -143,6 +164,8 @@ func _make_line_edit(placeholder: String, w: float = 140.0) -> LineEdit:
 	var le := LineEdit.new()
 	le.placeholder_text = placeholder
 	le.custom_minimum_size = Vector2(w, 24)
+	le.focus_entered.connect(_on_text_focus_entered)
+	le.focus_exited.connect(_on_text_focus_exited)
 	return le
 
 
@@ -322,6 +345,7 @@ func _build_missions_tab() -> void:
 	tab.name = "Missions"
 	tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	tab.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tab.custom_minimum_size = Vector2(400, 200)
 	_tab_container.add_child(tab)
 
 	var scroll := ScrollContainer.new()
@@ -333,37 +357,43 @@ func _build_missions_tab() -> void:
 	_mission_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_mission_list_vbox)
 
-	_h_line(tab)
+	# Rows container — gets cleared on refresh
+	_mission_rows_vbox = VBoxContainer.new()
+	_mission_rows_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_mission_list_vbox.add_child(_mission_rows_vbox)
+
+	# Bottom controls (always present, never cleared by refresh)
+	_h_line(_mission_list_vbox)
 
 	var reg_btn := Button.new()
 	reg_btn.text = "Register New Mission..."
 	reg_btn.pressed.connect(_on_register_new)
-	tab.add_child(reg_btn)
+	_mission_list_vbox.add_child(reg_btn)
 
-	# Player data summary at bottom
-	_h_line(tab)
+	_h_line(_mission_list_vbox)
+
 	var pd_header := _make_label("Player Data (read-only)", Color(0.6, 0.8, 1.0), 12)
-	tab.add_child(pd_header)
+	_mission_list_vbox.add_child(pd_header)
 
-	var pd_hb := _hbox(tab)
-	var pd_money := Label.new()
-	pd_money.name = "PDMoney"
-	pd_money.add_theme_color_override("font_color", Color(1, 1, 0.4))
-	pd_hb.add_child(pd_money)
-	var pd_xp := Label.new()
-	pd_xp.name = "PDXP"
-	pd_xp.add_theme_color_override("font_color", Color(1, 1, 0.4))
-	pd_hb.add_child(pd_xp)
-	var pd_stim := Label.new()
-	pd_stim.name = "PDStim"
-	pd_stim.add_theme_color_override("font_color", Color(1, 1, 0.4))
-	pd_hb.add_child(pd_stim)
+	var pd_hb := _hbox(_mission_list_vbox)
+	_pd_money_label = Label.new()
+	_pd_money_label.name = "PDMoney"
+	_pd_money_label.add_theme_color_override("font_color", Color(1, 1, 0.4))
+	pd_hb.add_child(_pd_money_label)
+	_pd_xp_label = Label.new()
+	_pd_xp_label.name = "PDXP"
+	_pd_xp_label.add_theme_color_override("font_color", Color(1, 1, 0.4))
+	pd_hb.add_child(_pd_xp_label)
+	_pd_stim_label = Label.new()
+	_pd_stim_label.name = "PDStim"
+	_pd_stim_label.add_theme_color_override("font_color", Color(1, 1, 0.4))
+	pd_hb.add_child(_pd_stim_label)
 
-	var pd_missions := Label.new()
-	pd_missions.name = "PDMissions"
-	pd_missions.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
-	pd_missions.add_theme_font_size_override("font_size", 11)
-	tab.add_child(pd_missions)
+	_pd_missions_label = Label.new()
+	_pd_missions_label.name = "PDMissions"
+	_pd_missions_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	_pd_missions_label.add_theme_font_size_override("font_size", 11)
+	_mission_list_vbox.add_child(_pd_missions_label)
 
 
 # === Refresh ===
@@ -374,6 +404,15 @@ func _refresh_all() -> void:
 	_refresh_runtime()
 	_refresh_mission_list()
 	_refresh_player_data()
+
+	# Debug: check Missions tab state
+	var mt := _tab_container.get_child(1) if _tab_container.get_child_count() > 1 else null
+	if mt:
+		push_warning("Missions tab visible=" + str(mt.visible) + " size=" + str(mt.size))
+		for c in mt.get_children():
+			var cc = c as Control
+			push_warning("  child " + c.name + " visible=" + str(cc.visible) + " size=" + str(cc.size))
+		push_warning("  vbox children=" + str(_mission_list_vbox.get_child_count()) + " rows=" + str(_mission_rows_vbox.get_child_count()))
 
 
 func _refresh_mission_info() -> void:
@@ -393,15 +432,19 @@ func _refresh_mission_info() -> void:
 func _refresh_start_dropdown() -> void:
 	_start_mission_dropdown.clear()
 	var avail := MissionManager.get_available_missions()
+	var has_valid := false
 	for data in avail:
+		if data.scene_path.is_empty():
+			continue
 		_start_mission_dropdown.add_item("%s (%s)" % [data.title, data.id])
-	if avail.is_empty():
+		has_valid = true
+	if not has_valid:
 		_start_mission_dropdown.add_item("(no available missions)")
 		_start_mission_dropdown.disabled = true
 		_start_mission_btn.disabled = true
-	else:
-		_start_mission_dropdown.disabled = false
-		_start_mission_btn.disabled = false
+		return
+	_start_mission_dropdown.disabled = false
+	_start_mission_btn.disabled = false
 
 
 func _find_runtime() -> void:
@@ -496,11 +539,11 @@ func _set_runtime_controls_visible(v: bool) -> void:
 
 
 func _refresh_mission_list() -> void:
-	_clear_vbox(_mission_list_vbox)
+	_clear_vbox(_mission_rows_vbox)
 
 	if MissionManager.missions.is_empty():
 		var lbl := _make_label("No missions registered.", Color(0.7, 0.7, 0.7))
-		_mission_list_vbox.add_child(lbl)
+		_mission_rows_vbox.add_child(lbl)
 		return
 
 	for mid in MissionManager.missions:
@@ -511,7 +554,7 @@ func _refresh_mission_list() -> void:
 		var hb := HBoxContainer.new()
 		hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		hb.custom_minimum_size = Vector2(0, ROW_HEIGHT)
-		_mission_list_vbox.add_child(hb)
+		_mission_rows_vbox.add_child(hb)
 
 		var status_icon := Label.new()
 		status_icon.custom_minimum_size = Vector2(20, 0)
@@ -566,40 +609,115 @@ func _refresh_mission_list() -> void:
 		edit_vbox.name = "Edit_%s" % mid
 		edit_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		edit_vbox.hide()
-		_mission_list_vbox.add_child(edit_vbox)
+		_mission_rows_vbox.add_child(edit_vbox)
 		_edit_forms[mid] = edit_vbox
 
 		_build_edit_form(edit_vbox, data, mid)
 
 
+func _get_scene_paths() -> Array[String]:
+	var paths: Array[String] = []
+	_scan_dir("res://", paths)
+	return paths
+
+
+func _scan_dir(dir_path: String, paths: Array[String]) -> void:
+	var dir := DirAccess.open(dir_path)
+	if not dir:
+		return
+	for f in dir.get_files():
+		if f.ends_with(".tscn"):
+			paths.append(dir_path.path_join(f))
+	for d in dir.get_directories():
+		if not d.begins_with("."):
+			_scan_dir(dir_path.path_join(d), paths)
+
+
+func _get_mission_ids() -> Array[String]:
+	var ids: Array[String] = []
+	for mid in MissionManager.missions:
+		ids.append(mid)
+	return ids
+
+
+func _make_field_row(parent: VBoxContainer, label: String, text: String) -> HBoxContainer:
+	var hb := HBoxContainer.new()
+	hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(hb)
+	var lbl := Label.new()
+	lbl.text = label.capitalize() + ":"
+	lbl.custom_minimum_size = Vector2(160, 0)
+	lbl.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	hb.add_child(lbl)
+	var le := _make_line_edit(text, 200)
+	le.text = text
+	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hb.add_child(le)
+	return hb
+
+
 func _build_edit_form(parent: VBoxContainer, data: MissionData, mid: String) -> void:
-	var fields := {
-		"title": data.title,
-		"description": data.description,
-		"scene_path": data.scene_path,
-		"mutually_exclusive_with_id": data.mutually_exclusive_with_id,
-	}
-
 	var edits := {}
-	for key in ["title", "description", "scene_path", "mutually_exclusive_with_id"]:
-		var hb := HBoxContainer.new()
-		hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		parent.add_child(hb)
 
-		var lbl := Label.new()
-		lbl.text = key.replace("_", " ") + ":"
-		lbl.custom_minimum_size = Vector2(160, 0)
-		lbl.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
-		hb.add_child(lbl)
+	# ── Basic Info ──
+	parent.add_child(_make_label("─ Basic Info ─", Color(0.6, 0.8, 1.0), 13))
 
-		var le := LineEdit.new()
-		le.text = fields[key]
-		le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		le.custom_minimum_size = Vector2(200, 24)
-		hb.add_child(le)
-		edits[key] = le
+	var title_hb := _make_field_row(parent, "title", data.title)
+	var title_le := title_hb.get_child(1) as LineEdit
+	edits["title"] = title_le
 
-	# Checkboxes
+	var desc_hb := _make_field_row(parent, "description", data.description)
+	var desc_le := desc_hb.get_child(1) as LineEdit
+	edits["description"] = desc_le
+
+	# ── Mission Config ──
+	parent.add_child(_make_label("─ Mission Config ─", Color(0.6, 0.8, 1.0), 13))
+
+	var scene_hb := HBoxContainer.new()
+	scene_hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(scene_hb)
+	var scene_lbl := Label.new()
+	scene_lbl.text = "scene path:"
+	scene_lbl.custom_minimum_size = Vector2(160, 0)
+	scene_lbl.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	scene_hb.add_child(scene_lbl)
+	var scene_dd := OptionButton.new()
+	scene_dd.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scene_dd.add_item("(none)", 0)
+	for p in _get_scene_paths():
+		scene_dd.add_item(p)
+	for i in scene_dd.item_count:
+		if scene_dd.get_item_text(i) == data.scene_path:
+			scene_dd.select(i)
+			break
+	scene_hb.add_child(scene_dd)
+	scene_dd.focus_entered.connect(_on_text_focus_entered)
+	scene_dd.focus_exited.connect(_on_text_focus_exited)
+	edits["scene_path"] = scene_dd
+
+	var excl_hb := HBoxContainer.new()
+	excl_hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(excl_hb)
+	var excl_lbl := Label.new()
+	excl_lbl.text = "mutually exclusive with:"
+	excl_lbl.custom_minimum_size = Vector2(160, 0)
+	excl_lbl.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	excl_hb.add_child(excl_lbl)
+	var excl_dd := OptionButton.new()
+	excl_dd.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	excl_dd.add_item("(none)", 0)
+	for m_id in _get_mission_ids():
+		if m_id != mid:
+			excl_dd.add_item(m_id)
+	for i in excl_dd.item_count:
+		if excl_dd.get_item_text(i) == data.mutually_exclusive_with_id:
+			excl_dd.select(i)
+			break
+	excl_hb.add_child(excl_dd)
+	excl_dd.focus_entered.connect(_on_text_focus_entered)
+	excl_dd.focus_exited.connect(_on_text_focus_exited)
+	edits["mutually_exclusive_with_id"] = excl_dd
+
 	var cb_hb := HBoxContainer.new()
 	cb_hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(cb_hb)
@@ -614,11 +732,12 @@ func _build_edit_form(parent: VBoxContainer, data: MissionData, mid: String) -> 
 	is_available_cb.button_pressed = data.is_available
 	cb_hb.add_child(is_available_cb)
 
-	# Rewards
+	# ── Rewards & Prerequisites ──
+	parent.add_child(_make_label("─ Rewards & Prerequisites ─", Color(0.6, 0.8, 1.0), 13))
+
 	var rew_hb := HBoxContainer.new()
 	rew_hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(rew_hb)
-
 	rew_hb.add_child(_make_label("Rewards:", Color(0.8, 0.8, 0.8)))
 
 	var r_money := _make_spinbox(-9999, 9999, data.rewards.get("money", 0), 60)
@@ -631,39 +750,34 @@ func _build_edit_form(parent: VBoxContainer, data: MissionData, mid: String) -> 
 	r_stim.suffix = " stim"
 	rew_hb.add_child(r_stim)
 
-	# Prerequisites
 	var preq_hb := HBoxContainer.new()
 	preq_hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(preq_hb)
 	preq_hb.add_child(_make_label("Prerequisites (comma-sep):", Color(0.8, 0.8, 0.8)))
-	var preq_le := LineEdit.new()
+	var preq_le := _make_line_edit("", 200)
 	preq_le.text = ",".join(data.prerequisites)
 	preq_le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	preq_hb.add_child(preq_le)
 
 	# Save button
+	_h_line(parent)
 	var save_btn := _make_small_btn("Save Changes", 120)
-	save_btn.pressed.connect(_on_save_mission_edit.bind(mid, edits, is_campaign_cb, is_available_cb, r_money, r_xp, r_stim, preq_le))
+	save_btn.pressed.connect(_on_save_mission_edit.bind(mid, edits, is_campaign_cb, is_available_cb, r_money, r_xp, r_stim, preq_le, scene_dd, excl_dd))
 	parent.add_child(save_btn)
 
 
 func _refresh_player_data() -> void:
-	var pd_money := _mission_list_vbox.get_node("../PDMoney") as Label
-	var pd_xp := _mission_list_vbox.get_node("../PDXP") as Label
-	var pd_stim := _mission_list_vbox.get_node("../PDStim") as Label
-	var pd_missions := _mission_list_vbox.get_node("../PDMissions") as Label
-
-	if not pd_money:
+	if not _pd_money_label:
 		return
 
 	var money_val = PlayerData.money if PlayerData else 0
 	var xp_val = SkillManager.get_total_xp() if SkillManager else 0
 	var stim_val = SkillManager.get_neural_stimulators() if SkillManager else 0
-	pd_money.text = "Money: %d" % money_val
-	pd_xp.text = "  XP: %d" % xp_val
-	pd_stim.text = "  Stimulators: %d" % stim_val
+	_pd_money_label.text = "Money: %d" % money_val
+	_pd_xp_label.text = "  XP: %d" % xp_val
+	_pd_stim_label.text = "  Stimulators: %d" % stim_val
 
-	pd_missions.text = "Completed: %s  |  Unlocked: %s" % [
+	_pd_missions_label.text = "Completed: %s  |  Unlocked: %s" % [
 		str(MissionManager._progress.completed_mission_ids),
 		str(MissionManager._progress.unlocked_mission_ids),
 	]
@@ -677,7 +791,7 @@ func _on_add_objective() -> void:
 	var oid := _obj_id_edit.text.strip_edges()
 	if oid.is_empty():
 		return
-	var obj := ObjectiveData.new()
+	var obj := ObjectiveDataClass.new()
 	obj.id = oid
 	obj.description = _obj_desc_edit.text.strip_edges()
 	obj.is_primary = false
@@ -709,7 +823,7 @@ func _on_replace_primary() -> void:
 	var oid := _replace_pri_id.text.strip_edges()
 	if oid.is_empty():
 		return
-	var obj := ObjectiveData.new()
+	var obj := ObjectiveDataClass.new()
 	obj.id = oid
 	obj.description = _replace_pri_desc.text.strip_edges()
 	obj.is_primary = true
@@ -724,7 +838,7 @@ func _on_fail_primary() -> void:
 	var oid := _fail_pri_id.text.strip_edges()
 	if oid.is_empty():
 		return
-	var obj := ObjectiveData.new()
+	var obj := ObjectiveDataClass.new()
 	obj.id = oid
 	obj.description = _fail_pri_desc.text.strip_edges()
 	obj.is_primary = true
@@ -779,15 +893,15 @@ func _on_edit_mission(mid: String) -> void:
 		call_deferred("_center_panel")
 
 
-func _on_save_mission_edit(mid: String, edits: Dictionary, is_campaign_cb: CheckBox, is_available_cb: CheckBox, r_money: SpinBox, r_xp: SpinBox, r_stim: SpinBox, preq_le: LineEdit) -> void:
+func _on_save_mission_edit(mid: String, edits: Dictionary, is_campaign_cb: CheckBox, is_available_cb: CheckBox, r_money: SpinBox, r_xp: SpinBox, r_stim: SpinBox, preq_le: LineEdit, scene_dd: OptionButton, excl_dd: OptionButton) -> void:
 	var data := MissionManager.get_mission(mid)
 	if not data:
 		return
 
 	data.title = edits["title"].text
 	data.description = edits["description"].text
-	data.scene_path = edits["scene_path"].text
-	data.mutually_exclusive_with_id = edits["mutually_exclusive_with_id"].text
+	data.scene_path = "" if scene_dd.selected == 0 else scene_dd.get_item_text(scene_dd.selected)
+	data.mutually_exclusive_with_id = "" if excl_dd.selected == 0 else excl_dd.get_item_text(excl_dd.selected)
 	data.is_campaign = is_campaign_cb.button_pressed
 	data.is_available = is_available_cb.button_pressed
 	data.rewards["money"] = int(r_money.value)
@@ -795,27 +909,48 @@ func _on_save_mission_edit(mid: String, edits: Dictionary, is_campaign_cb: Check
 	data.rewards["neural_stimulators"] = int(r_stim.value)
 
 	var preq_text := preq_le.text.strip_edges()
-	data.prerequisites = preq_text.split(",", false) if not preq_text.is_empty() else []
+	data.prerequisites.assign(preq_text.split(",", false))
 
 	_refresh_mission_list()
 	_center_panel()
 
 
 func _on_register_new() -> void:
-	var data := MissionData.new()
-	data.id = "new_mission_%d" % Time.get_ticks_msec()
-	data.title = "New Mission"
-	data.description = ""
+	var data := MissionDataClass.new()
+	var rid := "mission_%d" % randi()
+	data.id = rid
+	data.title = rid.capitalize()
+	data.description = "A test mission created at runtime."
 	data.scene_path = ""
-	data.is_available = false
+	data.is_campaign = false
+	data.is_available = true
+	data.is_completed = false
+	data.mutually_exclusive_with_id = ""
+	data.prerequisites = []
+	data.rewards = {"money": 0, "xp": 0, "neural_stimulators": 0, "story_flags": {}}
 	MissionManager.register_mission(data)
 	_refresh_mission_list()
 	_refresh_start_dropdown()
+	_tab_container.current_tab = 1
 
 
 func _clear_vbox(vbox: VBoxContainer) -> void:
 	for child in vbox.get_children():
+		vbox.remove_child(child)
 		child.queue_free()
+
+
+func _on_text_focus_entered() -> void:
+	_editing_text = true
+
+
+func _on_text_focus_exited() -> void:
+	_editing_text = false
+
+
+func _exit_tree() -> void:
+	if not _was_paused:
+		get_tree().paused = false
 
 
 func _close() -> void:

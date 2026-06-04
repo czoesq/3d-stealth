@@ -135,6 +135,9 @@ func start_mission(mission_id: String) -> void:
 	if not data.is_available:
 		push_error("MissionManager: mission not available: ", mission_id)
 		return
+	if data.scene_path.is_empty():
+		push_error("MissionManager: mission has no scene_path: ", mission_id)
+		return
 
 	select_mission(mission_id)
 

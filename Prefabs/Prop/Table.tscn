@@ -1,0 +1,63 @@
+[gd_scene format=3 uid="uid://bp3jrtm05d2v6"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_tabletop"]
+albedo_color = Color(0.5, 0.35, 0.2, 1)
+
+[sub_resource type="StandardMaterial3D" id="Mat_leg"]
+albedo_color = Color(0.35, 0.25, 0.15, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_top"]
+material = SubResource("Mat_tabletop")
+size = Vector3(2.0, 0.1, 1.0)
+
+[sub_resource type="BoxShape3D" id="BoxShape_top"]
+size = Vector3(2.0, 0.1, 1.0)
+
+[sub_resource type="BoxMesh" id="BoxMesh_leg"]
+material = SubResource("Mat_leg")
+size = Vector3(0.08, 0.7, 0.08)
+
+[sub_resource type="BoxShape3D" id="BoxShape_leg"]
+size = Vector3(0.08, 0.7, 0.08)
+
+[node name="Table" type="StaticBody3D"]
+
+[node name="TopMesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)
+mesh = SubResource("BoxMesh_top")
+
+[node name="TopShape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)
+shape = SubResource("BoxShape_top")
+
+[node name="LegFL" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.92, 0.35, -0.42)
+mesh = SubResource("BoxMesh_leg")
+
+[node name="LegFLShape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.92, 0.35, -0.42)
+shape = SubResource("BoxShape_leg")
+
+[node name="LegFR" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.92, 0.35, 0.42)
+mesh = SubResource("BoxMesh_leg")
+
+[node name="LegFRShape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.92, 0.35, 0.42)
+shape = SubResource("BoxShape_leg")
+
+[node name="LegBL" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.92, 0.35, -0.42)
+mesh = SubResource("BoxMesh_leg")
+
+[node name="LegBLShape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.92, 0.35, -0.42)
+shape = SubResource("BoxShape_leg")
+
+[node name="LegBR" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.92, 0.35, 0.42)
+mesh = SubResource("BoxMesh_leg")
+
+[node name="LegBRShape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.92, 0.35, 0.42)
+shape = SubResource("BoxShape_leg")
