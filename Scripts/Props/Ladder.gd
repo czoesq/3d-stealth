@@ -11,6 +11,7 @@ class_name Ladder
 var _climbing_player: Node3D = null
 var _indicator: Node3D
 var _ladder_area: Area3D
+var _detaching: bool = false
 
 
 func _ready() -> void:
@@ -21,6 +22,18 @@ func _ready() -> void:
 
 func get_ladder_height() -> float:
 	return ladder_height
+
+
+func get_ladder_width() -> float:
+	return ladder_width
+
+
+func get_world_base_y() -> float:
+	return global_position.y - ladder_height * 0.5 * scale.y
+
+
+func get_world_top_y() -> float:
+	return global_position.y + ladder_height * 0.5 * scale.y
 
 
 func on_e_interact(player_node: Node3D) -> void:
@@ -41,8 +54,9 @@ func _attach_player(player_node: Node3D) -> void:
 
 
 func _detach_player() -> void:
-	if not _climbing_player:
+	if _detaching or not _climbing_player:
 		return
+	_detaching = true
 	if "_detach_from_ladder" in _climbing_player:
 		_climbing_player._detach_from_ladder()
 	if "on_ladder" in _climbing_player:
@@ -50,6 +64,7 @@ func _detach_player() -> void:
 	_climbing_player = null
 	if _indicator and _indicator.has_method("set_e_text"):
 		_indicator.set_e_text("Climb")
+	_detaching = false
 
 
 func get_e_label() -> String:
@@ -83,10 +98,12 @@ func _generate() -> void:
 			remove_child(child)
 			child.queue_free()
 
-	collision_layer = 2
+	collision_layer = 1 | 2
 
 	var rail_mat := StandardMaterial3D.new()
 	rail_mat.albedo_color = Color(0.4, 0.4, 0.42)
+
+	var half_h := ladder_height * 0.5
 
 	var rail_mesh := BoxMesh.new()
 	rail_mesh.size = Vector3(rail_thickness, ladder_height, rail_thickness)
@@ -97,16 +114,16 @@ func _generate() -> void:
 		var rail := MeshInstance3D.new()
 		rail.name = "Rail" + ("L" if side < 0 else "R")
 		rail.mesh = rail_mesh
-		rail.position = Vector3(x, ladder_height * 0.5, 0)
+		rail.position = Vector3(x, 0, 0)
 		add_child(rail)
 
 		var shape := CollisionShape3D.new()
 		shape.shape = BoxShape3D.new()
 		shape.shape.size = Vector3(rail_thickness, ladder_height, rail_thickness)
-		shape.position = Vector3(x, ladder_height * 0.5, 0)
+		shape.position = Vector3(x, 0, 0)
 		add_child(shape)
 
-	var num_rungs := maxi(0, floori(ladder_height / rung_spacing) - 1)
+	var num_rungs := maxi(1, floori(ladder_height / rung_spacing))
 	if num_rungs > 0:
 		var rung_mat := StandardMaterial3D.new()
 		rung_mat.albedo_color = Color(0.35, 0.35, 0.38)
@@ -115,8 +132,10 @@ func _generate() -> void:
 		rung_mesh.size = Vector3(ladder_width, rung_thickness, rung_thickness)
 		rung_mesh.material = rung_mat
 
+		var total_rung_height := (num_rungs - 1) * rung_spacing
+		var start_y := -total_rung_height * 0.5
 		for i in num_rungs:
-			var y := (i + 1) * rung_spacing
+			var y := start_y + i * rung_spacing
 			var rung := MeshInstance3D.new()
 			rung.name = "Rung" + str(i)
 			rung.mesh = rung_mesh
@@ -135,7 +154,7 @@ func _generate() -> void:
 	var box := BoxShape3D.new()
 	box.size = Vector3(ladder_width + 0.3, ladder_height, 0.3)
 	area_shape.shape = box
-	area_shape.position = Vector3(0, ladder_height * 0.5, 0)
+	area_shape.position = Vector3(0, 0, 0)
 	_ladder_area.add_child(area_shape)
 	_ladder_area.collision_layer = 0
 	_ladder_area.collision_mask = 1

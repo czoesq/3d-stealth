@@ -69,6 +69,9 @@ var _current_revive_target: Node3D = null
 var _current_alarm_panel: Node3D = null
 var _get_help_target: Vector3
 var _investigate_timer: float = 0.0
+var _smoke_investigation: bool = false
+var _smoke_position: Vector3
+var _smoke_radius: float = 2.5
 var _sweep_angle: float = 0.0
 var _sweep_dir: float = 1.0
 var _detection_bar_bg: MeshInstance3D
@@ -548,6 +551,7 @@ func _enter_search() -> void:
 	_has_last_known_pos = true
 	_sweep_angle = 0.0
 	_sweep_dir = 1.0
+	_smoke_investigation = false
 	if player_in_sight and player:
 		_search_target = player.global_position
 	elif player:
@@ -557,19 +561,29 @@ func _enter_search() -> void:
 
 
 func _process_search(delta: float) -> void:
-	velocity = velocity.lerp(Vector3.ZERO, 4.0 * delta)
+	var dist_to_target := global_position.distance_to(_search_target)
 
-	_sweep_angle += _sweep_dir * search_sweep_speed * delta
-	if abs(_sweep_angle) > search_sweep_range:
-		_sweep_dir *= -1
-		_sweep_angle = clampf(_sweep_angle, -search_sweep_range, search_sweep_range)
+	if dist_to_target > target_reached_distance * 2.0:
+		var move_dir := (_search_target - global_position).normalized()
+		move_dir.y = 0.0
+		if move_dir.length_squared() > 0.0:
+			var target_basis := Basis.looking_at(move_dir, Vector3.UP)
+			transform.basis = transform.basis.slerp(target_basis, turn_rate * delta)
+		velocity = velocity.lerp(move_dir * suspicious_speed, 6.0 * delta)
+	else:
+		velocity = velocity.lerp(Vector3.ZERO, 4.0 * delta)
 
-	var dir := (_search_target - global_position).normalized()
-	dir.y = 0.0
-	if dir.length_squared() > 0.0:
-		var swept := dir.rotated(Vector3.UP, deg_to_rad(_sweep_angle))
-		var target_basis := Basis.looking_at(swept, Vector3.UP)
-		transform.basis = transform.basis.slerp(target_basis, turn_rate * delta)
+		_sweep_angle += _sweep_dir * search_sweep_speed * delta
+		if abs(_sweep_angle) > search_sweep_range:
+			_sweep_dir *= -1
+			_sweep_angle = clampf(_sweep_angle, -search_sweep_range, search_sweep_range)
+
+		var dir := (_search_target - global_position).normalized()
+		dir.y = 0.0
+		if dir.length_squared() > 0.0:
+			var swept := dir.rotated(Vector3.UP, deg_to_rad(_sweep_angle))
+			var target_basis := Basis.looking_at(swept, Vector3.UP)
+			transform.basis = transform.basis.slerp(target_basis, turn_rate * delta)
 
 	_search_timer += delta
 
@@ -577,6 +591,7 @@ func _process_search(delta: float) -> void:
 # ── PURSUIT ──────────────────────────────────────────────────────────
 
 func _enter_pursuit() -> void:
+	_smoke_investigation = false
 	state = State.PURSUIT
 	_has_last_known_pos = true
 	nav_agent.target_position = last_known_player_pos
@@ -614,6 +629,7 @@ func get_last_known_pos() -> Vector3:
 
 func _process_pursuit(delta: float) -> void:
 	if player and _check_vision():
+		_smoke_investigation = false
 		last_known_player_pos = player.global_position
 		nav_agent.target_position = last_known_player_pos
 		_search_target = last_known_player_pos
@@ -623,14 +639,25 @@ func _process_pursuit(delta: float) -> void:
 		return
 
 	if not nav_agent.is_navigation_finished():
-		_move_toward_target(chase_speed, delta)
+		var speed := suspicious_speed if _smoke_investigation else chase_speed
+		_move_toward_target(speed, delta)
 		return
 
 	_investigate_timer += delta
-	if _investigate_timer >= 2.0:
-		if debug:
-			print("enemy: investigate done, returning to patrol")
-		_return_to_nearest_patrol()
+	var timeout := 4.0 if _smoke_investigation else 2.0
+	if _investigate_timer >= timeout:
+		if _smoke_investigation:
+			if debug:
+				print("enemy: reached smoke location, searching")
+			_smoke_investigation = false
+			_enter_search()
+			_search_target = _smoke_position
+			# Extend search duration for smoke investigation
+			_search_timer = -5.0
+		else:
+			if debug:
+				print("enemy: investigate done, returning to patrol")
+			_return_to_nearest_patrol()
 
 
 # ── REVIVE ───────────────────────────────────────────────────────────
@@ -856,9 +883,12 @@ func _handle_state_transitions(detected: bool) -> void:
 			_search_target = player.global_position
 			_search_timer = 0.0
 		if detection_meter >= detection_max:
+			_smoke_investigation = false
 			_enter_pursuit()
 			return
-		if not detected and detection_meter <= 0.0 and _search_timer >= 10.0:
+		var search_timeout := 15.0 if _smoke_investigation else 10.0
+		if not detected and detection_meter <= 0.0 and _search_timer >= search_timeout:
+			_smoke_investigation = false
 			_return_to_patrol()
 		return
 
@@ -966,6 +996,7 @@ func _is_alone() -> bool:
 # ── Return to Patrol ─────────────────────────────────────────────────
 
 func _return_to_patrol() -> void:
+	_smoke_investigation = false
 	_has_last_known_pos = false
 	_search_timer = 0.0
 	_current_revive_target = null
@@ -1041,11 +1072,74 @@ func _check_vision() -> bool:
 	if vision_ray.is_colliding():
 		var col := vision_ray.get_collider()
 		if col == player or (col is Node and col.is_in_group("player")):
+			if _is_smoke_blocking(pos):
+				player_in_sight = false
+				return false
 			player_in_sight = true
 			return true
 
 	player_in_sight = false
 	return false
+
+
+func _is_smoke_blocking(target_pos: Vector3) -> bool:
+	var space := get_world_3d().direct_space_state
+	if not space:
+		return false
+	var from := global_position + Vector3(0, 0.9, 0)
+	var dist := from.distance_to(target_pos)
+	var query := PhysicsRayQueryParameters3D.create(from, target_pos, 4)
+	query.collide_with_areas = true
+	var result := space.intersect_ray(query)
+	if not result:
+		return false
+	var hit_dist := from.distance_to(result.position)
+	return hit_dist < dist + 0.5 and result.collider is Area3D and result.collider.is_in_group("smoke")
+
+
+func investigate_location(pos: Vector3) -> void:
+	if state in [State.KNOCKED_OUT, State.DEAD, State.PURSUIT]:
+		return
+	if state == State.SEARCH:
+		_search_target = pos
+		return
+	_enter_search()
+	_search_target = pos
+	_has_last_known_pos = true
+	_search_timer = 0.0
+
+
+func smoke_detected(pos: Vector3, radius: float) -> void:
+	match state:
+		State.KNOCKED_OUT, State.DEAD:
+			return
+		State.PURSUIT:
+			_smoke_investigation = true
+			_smoke_position = pos
+			_smoke_radius = radius
+			nav_agent.target_position = pos
+			_search_target = pos
+			_investigate_timer = 0.0
+			if debug:
+				print("enemy: smoke detected during pursuit, approaching cautiously")
+		State.SEARCH:
+			_search_target = pos
+			_smoke_investigation = true
+			_smoke_position = pos
+			_smoke_radius = radius
+			_search_timer = 0.0
+			if debug:
+				print("enemy: smoke detected during search, redirecting")
+		_:
+			_smoke_investigation = true
+			_smoke_position = pos
+			_smoke_radius = radius
+			_enter_search()
+			_search_target = pos
+			_has_last_known_pos = true
+			_search_timer = 0.0
+			if debug:
+				print("enemy: smoke detected, investigating")
 
 
 func _check_hearing() -> bool:

@@ -9,14 +9,20 @@ Token-preserving reference. Update when files change.
 ├── design_principles.md     # Design doc (51 lines)
 ├── project.godot            # Godot 4.6, Forward Plus, Jolt Physics
 ├── icon.svg
-├── Scripts/
+ ├── Scripts/
 │   ├── AI/
 │   │   ├── enemy_controller.gd        # 1152 lines: enemy AI state machine
 │   │   └── TakedownIndicator.gd       # 174 lines: billboard panels above enemy
 │   ├── Player/
-│   │   ├── player_controller.gd       # 394 lines: player movement, M-key mission debug toggle
-│   │   ├── PlayerTakedownController.gd # 324 lines: takedown + drag interaction
+│   │   ├── player_controller.gd       # 547 lines: player movement, step-up climb, ladder interact, M-key mission debug toggle
+│   │   ├── PlayerTakedownController.gd # 344 lines: takedown + drag + door/ladder E-interact
 │   │   └── PlayerData.gd              # 35 lines: autoload stub (money, story_flags)
+│   ├── Interactables/
+│   │   ├── Interactable.gd            # 74 lines: base interactable class (E/Q groups, range, prompt labels)
+│   │   ├── InteractableIndicator.gd   # 131 lines: billboard with yellow/brown panels, hold-progress fill
+│   │   └── Door.gd                    # 304 lines: swing open/close, break-apart physics (Jolt), E/Q interaction
+│   ├── Props/
+│   │   └── Ladder.gd                  # 195 lines: procedural ladder generation, E-interact climb system
 │   ├── Navigation/ground_nav.gd       # 44 lines: runtime navmesh baking
 │   ├── Camera/camera_follow.gd        # 21 lines: ortho camera follow
 │   ├── Skills/
@@ -26,7 +32,7 @@ Token-preserving reference. Update when files change.
 │   │   ├── mission_data.gd            # 18 lines: MissionData Resource
 │   │   ├── objective_data.gd          # 8 lines: ObjectiveData Resource
 │   │   ├── mission_progress.gd        # 5 lines: MissionProgress save Resource
-│   │   ├── mission_manager.gd         # 143 lines: autoload mission system
+│   │   ├── mission_manager.gd         # 146 lines: autoload mission system
 │   │   ├── mission_runtime.gd         # 141 lines: per-mission dynamic objectives
 │   │   └── mission_hud.gd             # 115 lines: right-side objective HUD
 │   └── UI/
@@ -38,8 +44,16 @@ Token-preserving reference. Update when files change.
 │   └── MissionHUD.tscn                # 9 lines: right-side objective panel scene
 ├── Prefabs/
 │   ├── Enemy/enemy.tscn               # Enemy scene (72 lines)
-│   └── Player/player.tscn             # Player scene (24 lines)
-└── test_world.tscn                    # Test scene (179 lines)
+│   ├── Player/player.tscn             # Player scene (24 lines)
+│   └── Prop/
+│       ├── Door.tscn                  # Door prefab with editor placeholder mesh
+│       ├── Ladder.tscn                # Procedural ladder with E-interact
+│       ├── Stairs.tscn                # Stairs with ConvexPolygonShape3D ramp collision
+│       ├── Catwalk.tscn               # Catwalk walkway
+│       ├── Crate.tscn                 # Crate box
+│       ├── Table.tscn                 # Table prop
+│       └── Vent.tscn                  # Vent prop
+└── test_world.tscn                    # Test scene (196 lines)
 ```
 
 ## Scene Tree (test_world.tscn)
@@ -52,7 +66,10 @@ TestWorld (Node3D)
 ├── WallL / WallR / WallTop (StaticBody3D)
 ├── Platform (StaticBody3D, 4×0.5×4, y=1.5)
 ├── Ramp (StaticBody3D, rotated, y=0.75)
-├── Crate (StaticBody3D, 1×1×1, y=0.5)
+├── Stairs (Stairs.tscn instance, (-3, 0, -2.61), rotated 180°)
+├── Door (Door.tscn instance, (2, 0, -3.29))
+├── Ladder (Ladder.tscn instance, (3.42, 0, 2.51))
+├── Crate (Crate.tscn instance, (-3, 0, 0.5))
 ├── NavigationRegion3D (ground_nav.gd)
 ├── Enemy (enemy.tscn instance, (-5, 0.9, 2), debug=true)
 └── Player (player.tscn instance, (0, 0.9, 0))
@@ -164,9 +181,28 @@ TestWorld (Node3D)
 **Known issue**: Groups from `.tscn` instances NOT propagated — `add_to_group("enemy")` called in `_ready()`.
 
 ### player_controller.gd
-**Role**: Player movement (WASD), sprint toggle (Shift), crouch (C), jump (Space), invisibility toggle (G), L key for skill debug.
+**Role**: Player movement (WASD), sprint toggle (Shift), crouch (C), jump (Space), invisibility toggle (G), L key for skill debug, step-up auto-climb (1m), ladder climbing (E-interact).
 
-**Movement states**: `crouching`, `sprinting` (toggle), `dragging`. Sprint auto-disables crouch; sprinting while moving drains stamina.
+**Movement states**: `crouching`, `sprinting` (toggle), `dragging`, `on_ladder`. Sprint auto-disables crouch; sprinting while moving drains stamina.
+
+**Physics tuning**:
+- `floor_snap_length = 0.5` — snaps player to floors up to 0.5m below
+- `floor_max_angle = deg_to_rad(60)` — walkable surfaces up to 60° slope
+- `max_slides = 16` — extra slide iterations for stair ramps
+
+**Step-up auto-climb** — `_step_up(delta)` called before `move_and_slide()`:
+1. **Lower ray** from ankle (feet_y+0.05) projects `probe_dist=1.2`m forward — detects obstacle face
+2. **Upper ray** from `feet_y+max_step+0.1` (max 1.0m) same direction — checks clearance; if it hits, obstacle >1m, skip
+3. **Downward ray** from 0.4m behind hit1's face, at `hit1.y+max_step`, straight down — finds landing surface with walkable normal (≤60° from up)
+4. If all checks pass, lifts `global_position.y` to landing + 0.05m clearance, zeros `velocity.y`
+
+**Ladder climbing** — `_handle_ladder_movement(delta)`:
+- `on_ladder` flag set by `_attach_to_ladder()`, cleared by `_detach_from_ladder()`
+- `_ladder_nearby: Area3D` (collision_mask=2) detects ladder ClimbArea
+- W/S climbs at `climb_speed=3.0` with acceleration; X/Z clamped to ladder position
+- `_ladder_grace_timer=0.4s` prevents immediate ground-detach after attaching
+- Auto-detach at ground (when above 0.5m from base or pressing S near bottom) and at ladder top
+- `dist_from_base` uses `player_bottom_y` (origin − half capsule height)
 
 **Stamina** (`max_stamina=100`):
 - `stamina_drain_rate=20/s` while sprinting+moving (5s max sprint)
@@ -191,9 +227,9 @@ TestWorld (Node3D)
 - `_setup_hud()` — instantiates PlayerHUD as child (CanvasLayer)
 
 ### PlayerTakedownController.gd
-**Role**: Handles all enemy interaction — takedowns (lethal + knockout) and body dragging.
+**Role**: Handles all enemy interaction — takedowns (lethal + knockout), body dragging, and door/ladder E/Q proxied interaction.
 
-**Target priority**: Finds nearest interactable enemy within 1.5m. Only the closest target gets indicators (solves multi-target ambiguity).
+**Target priority**: Finds nearest interactable enemy within 1.5m. Only the closest target gets indicators (solves multi-target ambiguity). Also checks for nearby interactables (doors, ladders) in `"interactable"` group and calls their `on_e_interact`/`on_q_interact` methods.
 
 **Target types**:
 - `TAKEDOWN` (PATROL/SEARCH enemies) — facing angle checked (180° = always in front)
@@ -205,12 +241,16 @@ TestWorld (Node3D)
 | Near PATROL/SEARCH enemy | Instant lethal | Hold to charge knockout (1s, reduced by Subdue skill) |
 | Near KO'd/dead body | — | Hold 0.5s to start dragging |
 | While dragging | — | Tap to drop body |
+| Near door | Q = break_apart() | E = toggle open/close |
+| Near ladder | (none) | E = attach/detach climb |
 
-**Drag behavior**: Body follows 2.0m behind player via velocity matching. Player moves at crouch speed while dragging. Drop enemy via E tap. `CollisionShape3D` left enabled (no more disable/enable toggle).
+**Drag behavior**: Body follows 2.0m behind player via velocity matching. Player moves at crouch speed while dragging. Drop enemy via E tap. `CollisionShape3D` left enabled.
 
-**Indicators**: Interfaces with enemy's TakedownIndicator child via `show_takedown_indicators()`, `set_indicator_mode()`, `update_hold_progress()`.
+**Indicators**: Interfaces with enemy's TakedownIndicator child via `show_takedown_indicators()`, `set_indicator_mode()`, `update_hold_progress()`. For interactables, calls `get_e_label()`/`get_q_label()` and `set_indicator_text()` on their InteractableIndicator.
 
 **Takedown animation**: Teleports player behind enemy, freezes both for 0.5s, then applies kill/knockout.
+
+**Ordering**: Enemy targets checked first (highest priority), then interactables (doors/ladders).
 
 ### TakedownIndicator.gd
 **Role**: Billboard panels above enemy head (y=2.8) showing available actions.
@@ -222,62 +262,66 @@ TestWorld (Node3D)
 
 Camera-facing via `_process()` with Basis.looking_at().
 
-### PlayerHUD.gd
-**Role**: Bottom-left HUD with stance indicator, stamina bar, health bar.
+### Interactable.gd
+**Role**: Base class for interactable objects (doors, ladders). `class_name Interactable extends Node3D`.
 
-**Layout**: CanvasLayer → Control root. Responsive via `Viewport.size_changed`.
+**Fields**: `interaction_range = 2.0`, indicator ref, enemy groups vars.
 
-**Elements**:
-- StanceIcon (TextureRect) — cycles crouch/walk/sprint icons (`UI/HUD/icon-{crouching,walking,sprinting}.png`)
-- Stamina bar (ColorRect bg + fill) — yellow fill, hidden at 100%, flashes white on depletion
-- Health bar (ColorRect bg + fill) — green fill, faded at 100%
+**Interface methods** (overridden by subclasses):
+- `on_e_interact(caller)` — called when player presses E near this interactable
+- `on_q_interact(caller)` — called when player presses Q near this interactable
+- `get_e_label() -> String` — panel label for E action (default `"Interact"`)
+- `get_q_label() -> String` — panel label for Q action (default `""`, hides Q panel)
 
-**Wiring**: Finds player via `"player"` group, connects to `movement_state_changed`, `stamina_changed`, `stamina_depleted`, `health_changed` signals.
+**Groups**: `add_to_group("interactable")` in `_ready()`.
 
-### MissionData (res://Scripts/Missions/mission_data.gd)
-`class_name MissionData extends Resource`. Core mission definition.
+### InteractableIndicator.gd
+**Role**: Billboard panel child of interactables showing E/Q labels and hold-progress.
 
-**Fields**: `id`, `title`, `description`, `scene_path`, `is_campaign`, `is_available`, `is_completed`, `mutually_exclusive_with_id`, `prerequisites: Array[String]`, `rewards: Dictionary` (money, xp, neural_stimulators, story_flags).
+**Structure**: Two sub-panels (E-yellow, Q-red) stacked vertically. Camera-facing via `_process()`.
 
-### ObjectiveData (res://Scripts/Missions/objective_data.gd)
-`class_name ObjectiveData extends Resource`. Single mission objective. Fields: `id`, `description`, `is_primary`, `is_complete`, `is_visible`.
-
-### MissionProgress (res://Scripts/Missions/mission_progress.gd)
-`class_name MissionProgress extends Resource`. Save file. Fields: `completed_mission_ids: Array[String]`, `unlocked_mission_ids: Array[String]`.
-
-### MissionRuntime (res://Scripts/Missions/mission_runtime.gd)
-**Role**: Node placed in each mission scene. Handles dynamic objectives during gameplay.
-
-**Fields**: `primary_objective: ObjectiveData`, `optional_objectives: Array[ObjectiveData]`, `completed_objectives: Array[ObjectiveData]`
+**Fields**: `e_label: Label3D`, `q_label: Label3D`, `e_bg/b: ColorRect`, `q_bg/b: ColorRect`, `hold_progress_bar: ColorRect`, `outer/outer_b: ColorRect`.
 
 **Methods**:
-- `add_objective(obj)` — appends to optional (rejects duplicates)
-- `complete_objective(id)` — moves from primary or optional to completed, emits `objective_completed`
-- `replace_primary_objective(new)` — old primary → optional, sets new primary
-- `fail_primary_objective(alternate)` — old primary → completed, sets alternate
-- `end_mission(outcome, rewards_override)` — applies override, calls MissionManager.complete_mission, emits `mission_ended`
-- `queue_update_hud()` — calls HUD.refresh_objectives with current state
-- `get_mission_id()` / `get_mission_data()` — reads from MissionManager
+- `set_indicator_text(e, q)` — updates E/Q labels, hides Q panel when q empty
+- `update_hold_progress(ratio)` — fills progress bar (ratio 0–1), hides bar when ≤0
+- `show()` / `hide()` — visibility toggle
 
-**Auto-HUD**: On `_ready()`, finds or creates a `CanvasLayer` + `MissionHUD.tscn` instance as a child of the current scene root.
+### Door.gd
+**Role**: Swing-open door with break-apart physics. `class_name Door extends Interactable`.
 
-**Signals**: `objective_completed(id)`, `primary_objective_changed(new)`, `mission_ended(outcome)`
+**States**: `is_open`, `is_locked`, `is_broken`, `current_swing`.
 
-### MissionHUD (res://Scripts/Missions/mission_hud.gd)
-**Role**: Right-side objectives panel (Control). Built programmatically in `_ready()`.
+**Swing interaction**:
+- E toggles `_swing_open()` / `_swing_close()` over 0.35s (tween rotation on Y, limited to 110°)
+- Q calls `break_apart()` — spawns BoxMesh fragments via `_spawn_fragments()`, plays `break_sound`
 
-**Layout**: Panel → MarginContainer → VBoxContainer — "MISSION OBJECTIVES" header, primary (gold `[...]`), optional (`· ...`), completed (`✓ ...`, green).
+**Break-apart** (Jolt physics):
+- Fragment pieces created as `RigidBody3D` with `BoxMesh`+`BoxShape3D` matching original collision proportions
+- Each piece `collision_layer=2`, `collision_mask=1` (environment only)
+- `randomize_fragment_settings()` applies random slight offset+rotation; impulse away from breaker position
+- `on_break_apart` signal emitted
 
-**Integration**: `refresh_objectives(objectives, completed_ids, primary)` called by MissionRuntime. Also finds MissionRuntime via `find_child` and calls `set_hud_reference(self)` for two-way binding.
+**Labels**: `get_e_label()` returns "Close"/"Open", `get_q_label()` returns "Break" (hidden when broken).
 
-### MissionDebugUI (res://Scripts/UI/MissionDebugUI.gd)
-**Role**: Debug panel toggled with M key. Two-tab interface for editing mission runtime + database.
+**Editor**: Placeholder (`EditorPlaceholder3D` child named `"Editor"`) stripped at runtime.
 
-**Tab 1 — "Current Mission"**: Displays current mission info. If MissionRuntime exists in scene, provides controls for: primary objective display + [Replace]/[Fail→Alt], optional objectives list with [Complete] per item, completed list, Add Objective form (id/desc), Complete Objective dropdown, End Mission section (outcome + reward overrides). Start Mission dropdown at top.
+### Ladder.gd
+**Role**: Procedural ladder with E-interact climbing. `class_name Ladder extends Interactable`.
 
-**Tab 2 — "Missions"**: Scrollable list of all registered missions with status icons. Per mission: [Edit] (expands inline editor for title, description, scene_path, mutually_exclusive, checkboxes, rewards, prerequisites), [Unlock], [Start]. [Register New Mission] button. Player data summary (money, XP, stim, completed/unlocked lists).
+**Dimensions**: `height = 3.0`, `width = 1.0`, `rung_spacing = 0.4`, `rail_thickness = 0.05`, `rung_thickness = 0.05`.
 
-**Build**: Programmatic (no .tscn), follows SkillDebugUI pattern. Closes via M or Escape.
+**Procedural generation** (`_generate()`):
+- Left/right rails (BoxMesh, `width × height × rail_thickness`)
+- Rungs spaced by `rung_spacing` (BoxMesh, `width × rung_thickness × rung_thickness`)
+- `ClimbArea` collision shape (BoxShape3D, covers ladder volume) as Area3D child on `collision_layer=2`
+- Strips children named `"Rung"*`, `"Rail"*`, `"ClimbArea"*`, `"Editor"*`, `"Prompt"*`, `"InteractableIndicator"*`
+
+**E-interact**: `on_e_interact(caller)` checks `caller.has_method("_attach_to_ladder")` and toggles climb.
+
+**Labels**: `get_e_label()` returns "Climb" / "Release", `get_q_label()` returns `""`.
+
+**Physics**: `collision_layer = 2` (player passes through while climbing, interacts via Area3D).
 
 ### ground_nav.gd
 **Role**: Runtime navmesh baking from all StaticBody3D colliders. `agent_max_climb = 0.5`, `agent_radius = 0.5`, `agent_height = 2.0`.
@@ -295,8 +339,8 @@ Camera-facing via `_process()` with Basis.looking_at().
 | toggle_invisibility | G | player_controller |
 | skill_debug_toggle | L | player_controller (toggles SkillDebugUI) |
 | mission_debug_toggle | M | player_controller (toggles MissionDebugUI) |
-| knockout | E | PlayerTakedownController |
-| lethal_takedown | Q | PlayerTakedownController |
+| knockout | E | PlayerTakedownController — also door/ladder E-interact |
+| lethal_takedown | Q | PlayerTakedownController — also door Q-break |
 
 ## Known Issues / Gotchas
 1. `drag_follow_distance = 2.0` — enemy may still clip through walls during sharp turns (velocity-matching drag keeps CollisionShape3D enabled).
@@ -309,3 +353,6 @@ Camera-facing via `_process()` with Basis.looking_at().
 8. `MissionRuntime` finds HUD via `get_node("/root/MissionHUD")` first (for scenes with pre-placed HUD), otherwise creates a `CanvasLayer` + `MissionHUD.tscn` instance. The HUD is scoped to the current scene.
 9. `MissionManager.complete_mission()` guards against double-completion (early return if `mission_id` already in `completed_mission_ids`).
 10. Mission data (MissionData Resource) is **not serialized** itself — only the progress (completed/unlocked IDs) is persisted. The actual mission definitions come from `register_mission()` calls at game start.
+11. Ladder `collision_layer=2` (same as door fragments) — player Area3D uses `collision_mask=2` to detect ladder. No cross-interference with physics because ladder is StaticBody3D (no RigidBody response).
+12. Step-up 3-raycast system probes 1.2m forward — may interact with surfaces at odd angles (diagonal walls, thin ledges). `floor_max_angle=60°` check on landing surface normal prevents climbing walls.
+13. Door break-apart pieces spawned as RigidBody3D with `collision_layer=2` — do NOT collide with player (player on layer 1), only environment (env mask=1).
